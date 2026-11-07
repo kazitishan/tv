@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, components, ipcMain, session, shell } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const fs = require('fs');
 const path = require('path');
@@ -257,10 +257,29 @@ async function loadAdBlocker() {
   }
 }
 
+/* ---------- DRM (Widevine) ---------- */
+
+// Streaming services (Prime Video, Netflix, Disney+, ...) need the Widevine CDM.
+// Only castLabs' Electron for Content Security provides it, through the
+// `components` API; on stock Electron this does nothing and DRM video won't play.
+async function loadWidevine() {
+  if (!components) {
+    console.warn('Widevine unavailable: stock Electron is installed. See "DRM video" in README.md.');
+    return;
+  }
+  try {
+    await components.whenReady(); // downloads/updates the CDM on first launch
+    console.log('Widevine ready:', JSON.stringify(components.status()));
+  } catch (err) {
+    console.error('Widevine failed to load; DRM video will not play:', err);
+  }
+}
+
 app.whenReady().then(async () => {
   startRemote();
-  // Load before any page opens; uBO starts filtering once its lists are ready (a few seconds).
-  await loadAdBlocker();
+  // Before any page opens: uBO starts filtering once its lists are ready (a few
+  // seconds), and Widevine must be installed before DRM video can play.
+  await Promise.all([loadAdBlocker(), loadWidevine()]);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

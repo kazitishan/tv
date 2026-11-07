@@ -51,6 +51,30 @@ A TV-style home screen built with Electron, React and Vite. Streaming sites open
 
    While a phone is connected, a green dot appears in the top right instead, and the QR code doesn't pop up. Click the dot to see "Remote control connected".
 
+## DRM video (Prime Video, Netflix, Disney+, …)
+
+Most streaming services protect their video with Google's Widevine DRM. Regular Electron doesn't include Widevine, so these services refuse to play. The app uses castLabs' [Electron for Content Security](https://github.com/castlabs/electron-releases) instead: a drop-in replacement for Electron that adds Widevine.
+
+1. **Install castLabs Electron** in place of regular Electron:
+
+   ```bash
+   npm install "https://github.com/castlabs/electron-releases#v45.2.1+wvcus" --save-dev
+   ```
+
+   The first launch afterwards downloads castLabs' Electron app (about 100 MB) and then Widevine, so it takes longer than usual. After that, the terminal should show `Widevine ready` instead of `Widevine unavailable`.
+
+2. **Sign the app for production (macOS and Windows).** castLabs' builds are only signed for development. Services like Prime Video and Netflix need a production "VMP" signature, which castLabs provides for free through their EVS service:
+
+   ```bash
+   npm run evs:setup    # one time: installs castLabs' signing tool into .venv-evs
+   npm run evs:signup   # one time: asks for your email, then a confirmation code
+   npm run sign:vmp
+   ```
+
+   Without this step, Prime Video shows "You are running an old or unsupported version of this browser", because it rejects the development signature.
+
+   Run `npm run sign:vmp` again whenever Electron is reinstalled (for example, after deleting `node_modules`), because reinstalling removes the signature.
+
 ## Phone remote
 
 The remote page runs in the phone's browser, so no app install is needed. It has:
