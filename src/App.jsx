@@ -1,26 +1,38 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apps } from './apps.js';
 import Backdrop from './components/Backdrop.jsx';
 import CardGrid from './components/CardGrid.jsx';
-import Clock from './components/Clock.jsx';
 import Hero from './components/Hero.jsx';
+import TopBar from './components/TopBar.jsx';
 
 const backdropImages = apps.map((app) => app.image);
 
+// Exposed by electron/preload.cjs; undefined when running in a plain browser.
+const tv = window.tv;
+
 export default function App() {
   const [focused, setFocused] = useState(0);
+  const [openAppName, setOpenAppName] = useState(null);
   const current = apps[focused];
 
-  // main process hands http(s) links opened this way to the default browser
-  const openApp = (app) => window.open(app.url, '_blank');
+  // The main process tells us when the in-app page closes (Home button or Esc).
+  useEffect(() => tv?.onInAppClosed(() => setOpenAppName(null)), []);
+
+  const openApp = (app) => {
+    if (tv) {
+      tv.openInApp(app.url);
+      setOpenAppName(app.name);
+    } else {
+      // not running inside Electron (e.g. a plain browser tab)
+      window.open(app.url, '_blank');
+    }
+  };
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <Backdrop images={backdropImages} activeIndex={focused} />
 
-      <header className="app-drag relative z-1 flex h-14 shrink-0 items-center justify-end px-14">
-        <Clock />
-      </header>
+      <TopBar openAppName={openAppName} onHome={() => tv?.closeInApp()} />
 
       <Hero title={current.name} subtitle={current.tagline} />
 

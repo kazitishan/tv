@@ -27,6 +27,11 @@
   -webkit-app-region: drag;
 }
 
+/* Keeps clickable things inside a drag region clickable. */
+@utility app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 @layer base {
   :root {
     color-scheme: dark;
