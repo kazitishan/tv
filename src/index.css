@@ -1,0 +1,44 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  --ease-tv: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --animate-rise: rise 0.55s var(--ease-tv) both;
+  --animate-press: press 0.45s var(--ease-tv);
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+  }
+
+  /* Dips the card's scale and springs back to its focused size. */
+  @keyframes press {
+    35% {
+      scale: 1.03;
+    }
+  }
+}
+
+/* Lets the frameless Electron window be dragged by this element. */
+@utility app-drag {
+  -webkit-app-region: drag;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply cursor-default overflow-hidden bg-black text-white antialiased select-none;
+  }
+}
