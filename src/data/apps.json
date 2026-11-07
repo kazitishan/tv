@@ -71,5 +71,17 @@
     "url": "https://open.spotify.com",
     "tagline": "Music & podcasts",
     "bg": "#000"
+  },
+  {
+    "name": "Movy",
+    "img": "movy.png",
+    "url": "https://www.movy.sx/",
+    "tagline": "Free movies & shows"
+  },
+  {
+    "name": "frameXTV",
+    "img": "framextv.png",
+    "url": "https://framextv.cc/",
+    "tagline": "Free movies & shows"
   }
 ]
