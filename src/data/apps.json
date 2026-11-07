@@ -1,0 +1,75 @@
+[
+  {
+    "name": "Apple TV",
+    "img": "apple-tv.png",
+    "url": "https://tv.apple.com",
+    "tagline": "Apple Originals, movies & shows"
+  },
+  {
+    "name": "Netflix",
+    "img": "netflix.png",
+    "url": "https://www.netflix.com",
+    "tagline": "Movies, series & more"
+  },
+  {
+    "name": "Prime Video",
+    "img": "prime-video.png",
+    "url": "https://www.primevideo.com",
+    "tagline": "Movies, shows & live sports"
+  },
+  {
+    "name": "Disney+",
+    "img": "disney.png",
+    "url": "https://www.disneyplus.com",
+    "tagline": "Disney, Pixar, Marvel, Star Wars & more"
+  },
+  {
+    "name": "HBO Max",
+    "img": "hbo.png",
+    "url": "https://www.hbomax.com",
+    "tagline": "HBO series, films & more"
+  },
+  {
+    "name": "Hulu",
+    "img": "hulu.png",
+    "url": "https://www.hulu.com",
+    "tagline": "Current TV, originals & movies"
+  },
+  {
+    "name": "YouTube",
+    "img": "youtube.png",
+    "url": "https://www.youtube.com",
+    "tagline": "Videos, creators & music"
+  },
+  {
+    "name": "Peacock",
+    "img": "peacock.png",
+    "url": "https://www.peacocktv.com",
+    "tagline": "Shows, movies & live sports"
+  },
+  {
+    "name": "Paramount+",
+    "img": "paramount.png",
+    "url": "https://www.paramountplus.com",
+    "tagline": "Movies, shows & live sports"
+  },
+  {
+    "name": "Crunchyroll",
+    "img": "crunchyroll.png",
+    "url": "https://www.crunchyroll.com",
+    "tagline": "Anime, simulcasts & more"
+  },
+  {
+    "name": "Apple Music",
+    "img": "apple-music.png",
+    "url": "https://music.apple.com",
+    "tagline": "Songs, albums & playlists"
+  },
+  {
+    "name": "Spotify",
+    "img": "spotify.png",
+    "url": "https://open.spotify.com",
+    "tagline": "Music & podcasts",
+    "bg": "#000"
+  }
+]

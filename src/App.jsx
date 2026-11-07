@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { apps } from './apps.js';
+import apps from './data/apps.json';
 import Backdrop from './components/Backdrop.jsx';
 import CardGrid from './components/CardGrid.jsx';
 import Hero from './components/Hero.jsx';
 import TopBar from './components/TopBar.jsx';
 
-const backdropImages = apps.map((app) => app.image);
+const backdropImages = apps.map((app) => app.img);
 
 // Exposed by electron/preload.cjs; undefined when running in a plain browser.
 const tv = window.tv;

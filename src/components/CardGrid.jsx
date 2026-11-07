@@ -47,10 +47,10 @@ export default function CardGrid({ items, focusedIndex, onFocusChange, onSelect 
     >
       {items.map((item, i) => (
         <Card
-          key={item.id}
+          key={item.name}
           ref={(el) => (cardRefs.current[i] = el)}
           name={item.name}
-          image={item.image}
+          image={item.img}
           bg={item.bg}
           focused={i === focusedIndex}
           pressed={i === pressedIndex}
