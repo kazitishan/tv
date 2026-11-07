@@ -5,18 +5,21 @@ import Card from './Card.jsx';
  * Grid of Cards with remote-style arrow-key navigation.
  * The parent owns which card is focused so other parts of the screen can react to it.
  */
-export default function CardGrid({ items, focusedIndex, onFocusChange, onSelect }) {
+export default function CardGrid({ items, focusedIndex, onFocusChange, onSelect, active = true }) {
   const [pressedIndex, setPressedIndex] = useState(null);
   const gridRef = useRef(null);
   const cardRefs = useRef([]);
 
   // Keep real DOM focus in sync so Enter/Space activate the focused card.
+  // While inactive (a popup is open) the popup keeps focus instead.
   useEffect(() => {
+    if (!active) return;
     const el = cardRefs.current[focusedIndex];
     if (el && document.activeElement !== el) el.focus({ preventScroll: true });
-  }, [focusedIndex]);
+  }, [focusedIndex, active]);
 
   useEffect(() => {
+    if (!active) return;
     const handleKeyDown = (e) => {
       const cols = getComputedStyle(gridRef.current).gridTemplateColumns.split(' ').length;
       const last = items.length - 1;
@@ -32,7 +35,7 @@ export default function CardGrid({ items, focusedIndex, onFocusChange, onSelect 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [items.length, focusedIndex, onFocusChange]);
+  }, [items.length, focusedIndex, onFocusChange, active]);
 
   const select = (i) => {
     setPressedIndex(i);

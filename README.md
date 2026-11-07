@@ -46,3 +46,23 @@ A TV-style home screen built with Electron, React and Vite. Streaming sites open
    ```bash
    npm start
    ```
+
+5. **Connect your phone as a remote (optional).** When the app starts, it shows a QR code. Scan it with your phone's camera; the phone must be on the same Wi‑Fi network as the computer. To skip, choose **Continue without connecting controller**. The phone icon in the top bar shows the QR code again.
+
+## Phone remote
+
+The remote page runs in the phone's browser, so no app install is needed. It has:
+
+- **Trackpad:** drag to move the on-screen pointer, tap to click, and swipe with two fingers to scroll.
+- **Back / Home / Forward:** move through the website's history, or return to the home screen.
+- **Skip back / Play-pause / Skip forward:** press the Left, Space and Right keys.
+- **Volume:** controls the Mac's system volume. On other systems it controls the video's volume.
+- **Type:** sends text to the selected text box on the TV.
+- **Refresh:** reloads the current page.
+- **Power:** quits the app and stops the remote server. In `npm run dev` it stops the Vite dev server too.
+
+Notes:
+
+- The link includes a random code that changes every launch, so only phones that scanned the current QR code can connect. After restarting the app, scan the new code.
+- The remote server uses port 8765, or any free port if 8765 is busy. On first launch, macOS may ask whether to allow incoming connections; choose **Allow**.
+- The code lives in [electron/remote/](electron/remote/): `server.cjs` (server and QR code), `control.cjs` (turns remote commands into clicks and key presses), `pointer.html` (the on-screen pointer) and `public/` (the phone page).

@@ -3,6 +3,7 @@ import apps from './data/apps.json';
 import Backdrop from './components/Backdrop.jsx';
 import CardGrid from './components/CardGrid.jsx';
 import Hero from './components/Hero.jsx';
+import RemotePrompt from './components/RemotePrompt.jsx';
 import TopBar from './components/TopBar.jsx';
 
 const backdropImages = apps.map((app) => app.img);
@@ -13,10 +14,15 @@ const tv = window.tv;
 export default function App() {
   const [focused, setFocused] = useState(0);
   const [openAppName, setOpenAppName] = useState(null);
+  // The phone remote QR code shows on startup (only inside Electron).
+  const [showRemotePrompt, setShowRemotePrompt] = useState(Boolean(tv?.getRemoteInfo));
   const current = apps[focused];
 
   // The main process tells us when the in-app page closes (Home button or Esc).
   useEffect(() => tv?.onInAppClosed(() => setOpenAppName(null)), []);
+
+  // A phone connected, so the QR code isn't needed any more.
+  useEffect(() => tv?.onRemoteConnected?.(() => setShowRemotePrompt(false)), []);
 
   const openApp = (app) => {
     if (tv) {
@@ -32,11 +38,23 @@ export default function App() {
     <div className="relative flex h-full flex-col overflow-hidden">
       <Backdrop images={backdropImages} activeIndex={focused} />
 
-      <TopBar openAppName={openAppName} onHome={() => tv?.closeInApp()} />
+      <TopBar
+        openAppName={openAppName}
+        onHome={() => tv?.closeInApp()}
+        onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
+      />
 
       <Hero title={current.name} subtitle={current.tagline} />
 
-      <CardGrid items={apps} focusedIndex={focused} onFocusChange={setFocused} onSelect={openApp} />
+      <CardGrid
+        items={apps}
+        focusedIndex={focused}
+        onFocusChange={setFocused}
+        onSelect={openApp}
+        active={!showRemotePrompt}
+      />
+
+      {showRemotePrompt && <RemotePrompt onClose={() => setShowRemotePrompt(false)} />}
     </div>
   );
 }

@@ -2,6 +2,8 @@ const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const fs = require('fs');
 const path = require('path');
+const { startRemoteServer } = require('./remote/server.cjs');
+const { createRemoteControl } = require('./remote/control.cjs');
 
 // Unpacked uBlock Origin, downloaded by scripts/fetch-ublock.cjs (runs on npm install).
 const UBLOCK_PATH = path.join(__dirname, '..', 'extensions', 'ublock-origin');
@@ -109,7 +111,13 @@ function createInAppController(win) {
     current = null;
   });
 
-  return { open, close };
+  // The open website, for the phone remote.
+  const page = () =>
+    current && !current.view.webContents.isDestroyed()
+      ? { wc: current.view.webContents, htmlFullscreen: current.htmlFullscreen }
+      : null;
+
+  return { open, close, page };
 }
 
 const controllers = new Map(); // renderer webContents id -> in-app controller
@@ -133,8 +141,24 @@ function createWindow() {
   });
 
   const id = win.webContents.id;
-  controllers.set(id, createInAppController(win));
-  win.on('closed', () => controllers.delete(id));
+  const inApp = createInAppController(win);
+  controllers.set(id, inApp);
+
+  mainWindow = win;
+  remoteControl = createRemoteControl({
+    win,
+    inApp,
+    topBarHeight: TOP_BAR_HEIGHT,
+    onStateChange: (state) => remote?.broadcast({ t: 'state', ...state }),
+  });
+
+  win.on('closed', () => {
+    controllers.delete(id);
+    if (mainWindow === win) {
+      mainWindow = null;
+      remoteControl = null;
+    }
+  });
 
   // Any other window.open(url) from the home screen goes to the default browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -149,6 +173,58 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 }
+
+/* ---------- Phone remote ---------- */
+
+let mainWindow = null;
+let remoteControl = null; // controls mainWindow
+let remote = null; // the running remote server
+let remoteReady = null; // resolves to the server, or null if it couldn't start
+let shuttingDown = false;
+
+function startRemote() {
+  remoteReady = startRemoteServer({
+    onMessage(msg) {
+      if (msg.t === 'power') shutDown();
+      else remoteControl?.handle(msg);
+    },
+    async onConnect(reply) {
+      // A phone connected: close the QR code popup and sync the volume slider.
+      mainWindow?.webContents.send('remote:connected');
+      if (remoteControl) reply({ t: 'state', ...(await remoteControl.state()) });
+    },
+  })
+    .then((server) => {
+      console.log(`Phone remote: ${server.url}`);
+      return (remote = server);
+    })
+    .catch((err) => {
+      console.error('Could not start the phone remote:', err);
+      return null;
+    });
+}
+
+ipcMain.handle('remote:info', async () => {
+  const server = await remoteReady;
+  return server && { url: server.url, qr: server.qr, lanAvailable: server.lanAvailable };
+});
+
+/** Power button: stop the remote server, then quit the app. */
+async function shutDown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const server = remote;
+  remote = null;
+  await server?.close().catch(() => {});
+  app.quit();
+}
+
+app.on('before-quit', () => {
+  remote?.close();
+  remote = null;
+});
+
+/* ---------- Ad blocker ---------- */
 
 async function loadAdBlocker() {
   if (!fs.existsSync(path.join(UBLOCK_PATH, 'manifest.json'))) {
@@ -170,6 +246,7 @@ async function loadAdBlocker() {
 }
 
 app.whenReady().then(async () => {
+  startRemote();
   // Load before any page opens; uBO starts filtering once its lists are ready (a few seconds).
   await loadAdBlocker();
   createWindow();

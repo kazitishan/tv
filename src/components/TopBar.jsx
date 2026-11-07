@@ -5,7 +5,7 @@ import Clock from './Clock.jsx';
  * shows a Home button and the app's name; the in-app page sits just below it.
  * Its height must match TOP_BAR_HEIGHT in electron/main.cjs.
  */
-export default function TopBar({ openAppName, onHome }) {
+export default function TopBar({ openAppName, onHome, onShowRemote }) {
   return (
     <header className="app-drag relative z-1 flex h-14 shrink-0 items-center justify-between pr-14 pl-24">
       <div className="flex items-center gap-4">
@@ -23,7 +23,23 @@ export default function TopBar({ openAppName, onHome }) {
           </>
         )}
       </div>
-      <Clock />
+      <div className="flex items-center gap-5">
+        {/* Shows the phone remote QR code again (home screen only; a website would cover the popup). */}
+        {onShowRemote && !openAppName && (
+          <button
+            onClick={onShowRemote}
+            aria-label="Connect phone remote"
+            title="Connect phone remote"
+            className="app-no-drag grid size-9 cursor-pointer place-items-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+              <path d="M11 18h2" />
+            </svg>
+          </button>
+        )}
+        <Clock />
+      </div>
     </header>
   );
 }

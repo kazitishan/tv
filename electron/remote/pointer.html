@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- Transparent, click-through overlay that draws the phone remote's pointer. -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      #pointer {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 30px;
+        height: 30px;
+        opacity: 0;
+        transform: translate(-100px, -100px);
+        transition: opacity 0.35s ease;
+        filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
+        will-change: transform;
+      }
+      #pointer.visible {
+        opacity: 1;
+      }
+      #pointer svg {
+        transform-origin: 4px 2px;
+        transition: transform 0.12s ease;
+      }
+      #pointer.pressed svg {
+        transform: scale(0.8);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="pointer">
+      <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+        <path
+          d="M4 2 L20 13.6 L12.9 14.8 L16.9 22 L13.9 23.6 L9.9 16.4 L4 21.2 Z"
+          fill="#fff"
+          stroke="#111"
+          stroke-width="1.3"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </div>
+    <script>
+      const pointer = document.getElementById('pointer');
+      // The arrow's tip sits at (4, 2) of the 24-unit icon drawn at 30px.
+      const TIP_X = 5;
+      const TIP_Y = 2.5;
+      let hideTimer;
+
+      window.movePointer = (x, y) => {
+        pointer.style.transform = `translate(${x - TIP_X}px, ${y - TIP_Y}px)`;
+        pointer.classList.add('visible');
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => pointer.classList.remove('visible'), 3000);
+      };
+
+      window.pressPointer = () => {
+        pointer.classList.add('pressed');
+        setTimeout(() => pointer.classList.remove('pressed'), 140);
+      };
+    </script>
+  </body>
+</html>
