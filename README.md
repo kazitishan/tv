@@ -49,6 +49,8 @@ A TV-style home screen built with Electron, React and Vite. Streaming sites open
 
 5. **Connect your phone as a remote (optional).** When the app starts, it shows a QR code. Scan it with your phone's camera; the phone must be on the same Wi‑Fi network as the computer. To skip, choose **Continue without connecting controller**. The phone icon in the top bar shows the QR code again.
 
+   While a phone is connected, a green dot appears in the top right instead, and the QR code doesn't pop up. Click the dot to see "Remote control connected".
+
 ## Phone remote
 
 The remote page runs in the phone's browser, so no app install is needed. It has:

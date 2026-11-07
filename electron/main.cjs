@@ -189,10 +189,10 @@ function startRemote() {
       else remoteControl?.handle(msg);
     },
     async onConnect(reply) {
-      // A phone connected: close the QR code popup and sync the volume slider.
-      mainWindow?.webContents.send('remote:connected');
+      sendRemoteStatus(); // closes the QR code popup and shows the green dot
       if (remoteControl) reply({ t: 'state', ...(await remoteControl.state()) });
     },
+    onDisconnect: sendRemoteStatus,
   })
     .then((server) => {
       console.log(`Phone remote: ${server.url}`);
@@ -203,6 +203,18 @@ function startRemote() {
       return null;
     });
 }
+
+/** Whether at least one phone is connected (`available` is false if the server failed). */
+const remoteStatus = () => ({ available: remote !== null, connected: (remote?.connectedCount() ?? 0) > 0 });
+
+function sendRemoteStatus() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote:status', remoteStatus());
+}
+
+ipcMain.handle('remote:status', async () => {
+  await remoteReady;
+  return remoteStatus();
+});
 
 ipcMain.handle('remote:info', async () => {
   const server = await remoteReady;

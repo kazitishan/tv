@@ -14,15 +14,32 @@ const tv = window.tv;
 export default function App() {
   const [focused, setFocused] = useState(0);
   const [openAppName, setOpenAppName] = useState(null);
-  // The phone remote QR code shows on startup (only inside Electron).
-  const [showRemotePrompt, setShowRemotePrompt] = useState(Boolean(tv?.getRemoteInfo));
+  const [remoteConnected, setRemoteConnected] = useState(false);
+  // The phone remote QR code popup. Opens on startup only if no phone is connected
+  // (the home screen also restarts on Refresh, while a phone may be connected).
+  const [showRemotePrompt, setShowRemotePrompt] = useState(false);
   const current = apps[focused];
 
   // The main process tells us when the in-app page closes (Home button or Esc).
   useEffect(() => tv?.onInAppClosed(() => setOpenAppName(null)), []);
 
-  // A phone connected, so the QR code isn't needed any more.
-  useEffect(() => tv?.onRemoteConnected?.(() => setShowRemotePrompt(false)), []);
+  useEffect(() => {
+    if (!tv?.getRemoteStatus) return;
+    let alive = true;
+    tv.getRemoteStatus().then((status) => {
+      if (!alive) return;
+      setRemoteConnected(status.connected);
+      if (!status.connected) setShowRemotePrompt(true);
+    });
+    const unsubscribe = tv.onRemoteStatus((status) => {
+      setRemoteConnected(status.connected);
+      if (status.connected) setShowRemotePrompt(false); // QR code no longer needed
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, []);
 
   const openApp = (app) => {
     if (tv) {
@@ -41,6 +58,7 @@ export default function App() {
       <TopBar
         openAppName={openAppName}
         onHome={() => tv?.closeInApp()}
+        remoteConnected={remoteConnected}
         onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
       />
 

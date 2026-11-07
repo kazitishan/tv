@@ -49,11 +49,12 @@ function listen(server, port) {
 
 /**
  * Starts the server. `onMessage(msg, reply)` is called for every command from a
- * phone; `onConnect(reply)` when a phone connects.
- * Resolves to { url, qr, lanAvailable, broadcast(msg), close() }.
+ * phone, `onConnect(reply)` when a phone connects and `onDisconnect()` when one
+ * leaves. Resolves to { url, qr, lanAvailable, connectedCount(), broadcast(msg), close() }.
  */
-async function startRemoteServer({ onMessage, onConnect }) {
+async function startRemoteServer({ onMessage, onConnect, onDisconnect }) {
   const token = crypto.randomBytes(12).toString('base64url');
+  const phones = new Set(); // open connections
 
   const server = http.createServer((req, res) => {
     const file = FILES[new URL(req.url, 'http://localhost').pathname];
@@ -77,6 +78,10 @@ async function startRemoteServer({ onMessage, onConnect }) {
   });
 
   wss.on('connection', (ws) => {
+    phones.add(ws);
+    ws.on('close', () => {
+      if (phones.delete(ws)) onDisconnect?.();
+    });
     const reply = (msg) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
     ws.on('message', (data) => {
       let msg;
@@ -106,11 +111,13 @@ async function startRemoteServer({ onMessage, onConnect }) {
     url,
     qr,
     lanAvailable: host !== null,
+    connectedCount: () => phones.size,
     broadcast(msg) {
       const data = JSON.stringify(msg);
       for (const client of wss.clients) if (client.readyState === client.OPEN) client.send(data);
     },
     close() {
+      phones.clear();
       for (const client of wss.clients) client.terminate();
       wss.close();
       server.closeAllConnections();

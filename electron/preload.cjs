@@ -12,9 +12,11 @@ contextBridge.exposeInMainWorld('tv', {
 
   // Phone remote: { url, qr, lanAvailable }, or null if it couldn't start.
   getRemoteInfo: () => ipcRenderer.invoke('remote:info'),
-  onRemoteConnected: (callback) => {
-    const listener = () => callback();
-    ipcRenderer.on('remote:connected', listener);
-    return () => ipcRenderer.removeListener('remote:connected', listener);
+  // { available, connected }: whether a phone is connected right now.
+  getRemoteStatus: () => ipcRenderer.invoke('remote:status'),
+  onRemoteStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('remote:status', listener);
+    return () => ipcRenderer.removeListener('remote:status', listener);
   },
 });

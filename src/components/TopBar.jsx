@@ -1,11 +1,12 @@
 import Clock from './Clock.jsx';
+import RemoteStatus from './RemoteStatus.jsx';
 
 /**
  * Window top bar (also the drag region). While an app is open in-window it
  * shows a Home button and the app's name; the in-app page sits just below it.
  * Its height must match TOP_BAR_HEIGHT in electron/main.cjs.
  */
-export default function TopBar({ openAppName, onHome, onShowRemote }) {
+export default function TopBar({ openAppName, onHome, remoteConnected, onShowRemote }) {
   return (
     <header className="app-drag relative z-1 flex h-14 shrink-0 items-center justify-between pr-14 pl-24">
       <div className="flex items-center gap-4">
@@ -24,8 +25,10 @@ export default function TopBar({ openAppName, onHome, onShowRemote }) {
         )}
       </div>
       <div className="flex items-center gap-5">
-        {/* Shows the phone remote QR code again (home screen only; a website would cover the popup). */}
-        {onShowRemote && !openAppName && (
+        {/* Green dot while a phone is connected; otherwise a button that shows the
+            QR code again (home screen only; a website would cover the popup). */}
+        {remoteConnected && <RemoteStatus />}
+        {!remoteConnected && onShowRemote && !openAppName && (
           <button
             onClick={onShowRemote}
             aria-label="Connect phone remote"
