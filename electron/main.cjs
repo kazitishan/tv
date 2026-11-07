@@ -1,5 +1,12 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
+const { ElectronChromeExtensions } = require('electron-chrome-extensions');
+const fs = require('fs');
 const path = require('path');
+
+// Unpacked uBlock Origin, downloaded by scripts/fetch-ublock.cjs (runs on npm install).
+const UBLOCK_PATH = path.join(__dirname, '..', 'extensions', 'ublock-origin');
+
+let extensions = null; // Chrome extension APIs for the default session
 
 // Height of the renderer's top bar; in-app pages are placed below it.
 const TOP_BAR_HEIGHT = 56;
@@ -85,6 +92,12 @@ function createInAppController(win) {
       layout();
     });
 
+    // Let extensions (uBlock Origin) see this page as the active tab.
+    if (extensions) {
+      extensions.addTab(wc, win);
+      extensions.selectTab(wc);
+    }
+
     win.contentView.addChildView(view);
     layout();
     wc.loadURL(url);
@@ -137,7 +150,28 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+async function loadAdBlocker() {
+  if (!fs.existsSync(path.join(UBLOCK_PATH, 'manifest.json'))) {
+    console.warn('uBlock Origin not found; run `npm run fetch:ublock`. Continuing without it.');
+    return;
+  }
+  try {
+    const ses = session.defaultSession;
+    // Must be registered before ElectronChromeExtensions adds its own preload.
+    ses.registerPreloadScript({
+      type: 'frame',
+      filePath: path.join(__dirname, 'extension-shim.preload.cjs'),
+    });
+    extensions = new ElectronChromeExtensions({ session: ses });
+    await ses.extensions.loadExtension(UBLOCK_PATH);
+  } catch (err) {
+    console.error('Failed to load uBlock Origin:', err);
+  }
+}
+
+app.whenReady().then(async () => {
+  // Load before any page opens; uBO starts filtering once its lists are ready (a few seconds).
+  await loadAdBlocker();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
