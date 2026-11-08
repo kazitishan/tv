@@ -1,117 +1,58 @@
-# tv
+# TV
 
-A TV-style home screen built with Electron, React and Vite. Streaming sites open inside the app, with ads blocked by [uBlock Origin](https://github.com/gorhill/uBlock).
+Turn any pc/laptop into a tv with built in ad-blocking and use your phone as a remote control
 
 ## Setup
 
-1. **Install Node.js** 20.19 or newer (22+ recommended). Check with:
+1. **Install Node.js**
+
+2. **Clone and install:**
 
    ```bash
-   node -v
-   ```
-
-2. **Clone the project** and go into its folder:
-
-   ```bash
-   git clone <repo-url> tv
+   git clone https://github.com/kazitishan/tv tv
    cd tv
-   ```
-
-3. **Install dependencies:**
-
-   ```bash
    npm install
    ```
 
-   This also downloads uBlock Origin into `extensions/ublock-origin/`. You should see:
+   This also downloads uBlock Origin. If that download fails, run `npm run fetch:ublock`.
 
-   ```
-   uBlock Origin 1.75.4 installed to extensions/ublock-origin
-   ```
-
-   If the download failed (for example, you were offline), run it again with:
+3. **Start the app:**
 
    ```bash
-   npm run fetch:ublock
+   npm run dev    # development, with live reload for the UI
+   npm start      # or: build and run the production version
    ```
 
-4. **Start the app** in development mode, with live reload for the React UI:
+   The first launch is slow: it downloads castLabs' Electron (about 100 MB) and Widevine, the DRM module. The terminal shows `Widevine ready` when it's done.
+
+4. **Sign Electron for DRM video (one time).** Netflix, Prime Video, Disney+ and similar services need this, or they refuse to play. Quit the app, then run:
 
    ```bash
-   npm run dev
+   npm run evs:setup    # installs castLabs' signing tool
+   npm run evs:signup   # creates a free castLabs account (email + confirmation code)
+   npm run sign:vmp     # signs Electron
    ```
 
-   Or build and run the production version:
+   Run this after the first launch, because that's when Electron is downloaded. Then start the app again.
 
-   ```bash
-   npm start
-   ```
+5. **Connect your phone (optional).** Scan the QR code with your phone's camera. The phone must be on the same Wi‑Fi. To skip, choose **Continue without connecting controller**.
 
-5. **Connect your phone as a remote (optional).** When the app starts, it shows a QR code. Scan it with your phone's camera; the phone must be on the same Wi‑Fi network as the computer. To skip, choose **Continue without connecting controller**. The phone icon in the top bar shows the QR code again.
+## Quirks
 
-   While a phone is connected, a green dot appears in the top right instead, and the QR code doesn't pop up. Click the dot to see "Remote control connected".
+**Setup and launch**
 
-## DRM video (Prime Video, Netflix, Disney+, …)
+- After reinstalling `node_modules`, launch the app once, then run `npm run sign:vmp` again, because reinstalling removes the signature. Without it, Prime Video says "You are running an old or unsupported version of this browser".
 
-Most streaming services protect their video with Google's Widevine DRM. Regular Electron doesn't include Widevine, so these services refuse to play. The app uses castLabs' [Electron for Content Security](https://github.com/castlabs/electron-releases) instead: a drop-in replacement for Electron that adds Widevine.
+**Phone remote**
 
-1. **Install castLabs Electron** in place of regular Electron:
+- The QR code changes every launch. After restarting the app, scan it again.
+- The remote uses port 8765, or another free port if 8765 is busy.
+- The remote's Power button quits the app. In `npm run dev` it stops the dev server too.
+- While a phone is connected, the computer's mouse cursor hides after 5 seconds without moving. Move the mouse to bring it back.
 
-   ```bash
-   npm install "https://github.com/castlabs/electron-releases#v45.2.1+wvcus" --save-dev
-   ```
+**Volume on a TV**
 
-   The first launch afterwards downloads castLabs' Electron app (about 100 MB) and then Widevine, so it takes longer than usual. After that, the terminal should show `Widevine ready` instead of `Widevine unavailable`.
+- macOS sometimes turns off its volume control when sound goes to a TV or monitor over HDMI or DisplayPort. The Mac's volume keys don't work there.
+- The phone remote's volume still works: it turns down the app's own audio instead. That can only make sound quieter than the TV's setting, never louder. So I recommend to set the TV/monitor volume to the loudest you'd want, then turn it down from the phone.
+- The remote's number is how loud it sounds: 50 is half as loud as 100, 1 is 1% as loud.
 
-2. **Sign the app for production (macOS and Windows).** castLabs' builds are only signed for development. Services like Prime Video and Netflix need a production "VMP" signature, which castLabs provides for free through their EVS service:
-
-   ```bash
-   npm run evs:setup    # one time: installs castLabs' signing tool into .venv-evs
-   npm run evs:signup   # one time: asks for your email, then a confirmation code
-   npm run sign:vmp
-   ```
-
-   Without this step, Prime Video shows "You are running an old or unsupported version of this browser", because it rejects the development signature.
-
-   Run `npm run sign:vmp` again whenever Electron is reinstalled (for example, after deleting `node_modules`), because reinstalling removes the signature.
-
-## Phone remote
-
-The remote page runs in the phone's browser, so no app install is needed. It has:
-
-- **Trackpad:** drag to move the on-screen pointer, tap to click, and swipe with two fingers to scroll.
-- **Back / Home / Forward:** move through the website's history, or return to the home screen.
-- **Skip back / Play-pause / Skip forward:** press the Left, Space and Right keys.
-- **Volume:** controls the Mac's system volume. When that can't be changed (for example, on a TV connected by HDMI) or on other systems, it controls the app's own volume instead. See [Volume on a TV or monitor](#volume-on-a-tv-or-monitor).
-- **Type:** sends text to the selected text box on the TV.
-- **Refresh:** reloads the current page.
-- **Power:** quits the app and stops the remote server. In `npm run dev` it stops the Vite dev server too.
-
-Notes:
-
-- While a phone is connected, the computer's own mouse cursor hides after 5 seconds without moving, so it doesn't sit on top of a video. Move the mouse to bring it back. Using the phone's trackpad doesn't bring it back; the phone has its own on-screen pointer.
-- The link includes a random code that changes every launch, so only phones that scanned the current QR code can connect. After restarting the app, scan the new code.
-- The remote server uses port 8765, or any free port if 8765 is busy. On first launch, macOS may ask whether to allow incoming connections; choose **Allow**.
-- The code lives in [electron/remote/](electron/remote/): `server.cjs` (server and QR code), `control.cjs` (turns remote commands into clicks and key presses), `pointer.html` (the on-screen pointer) and `public/` (the phone page).
-
-### Volume on a TV or monitor
-
-When a Mac sends sound to a TV or monitor over HDMI or DisplayPort, macOS turns off its own volume control. The volume keys and the menu bar slider stop working. The Mac sends sound at full level and expects the TV's own remote to set how loud it is.
-
-The phone remote handles this automatically. Each time you change the volume, the app checks whether the Mac's volume can be changed:
-
-- **It can** (built-in speakers, headphones, most Bluetooth speakers): the remote changes the Mac's system volume.
-- **It can't** (a TV or monitor over HDMI or DisplayPort): the remote changes the volume of sound played in the app. The home screen and website show no difference; videos just play quieter.
-
-The app volume can only make sound **quieter** than the TV's own setting, never louder. So the first time you connect to a TV:
-
-1. Set the remote's volume to 100.
-2. Use the TV's own remote to set the TV to the loudest volume you'd want.
-3. From then on, use the phone remote to turn it down from there.
-
-Notes:
-
-- The number is how loud it sounds compared with 100: 50 sounds half as loud, 10 sounds a tenth as loud, and 1 sounds 1% as loud. (The sound signal itself is turned down more than that, because ears hear a signal at half strength as only a little quieter.)
-- The site's own volume slider still works. The remote's volume is applied on top of it, so a site that resets its volume when a video loads (YouTube does) stays at the remote's level.
-- If you switch the Mac's sound output (for example, unplug the TV), the next volume change moves to the new mode. The app volume goes back to full, so sound isn't turned down twice.
-- The Mac's volume keys still can't change a TV's volume. Only the phone remote can.

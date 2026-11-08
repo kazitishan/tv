@@ -1,0 +1,324 @@
+# Architecture
+
+This document explains how the project works: what runs where, how the pieces talk to each other, and why things are built the way they are. For setup, see [README.md](README.md).
+
+## Overview
+
+The app is a TV-style home screen for a computer plugged into a TV. It shows a grid of streaming services. Picking one opens the service's website inside the app window. A phone can act as the remote: it scans a QR code, opens a web page served by the app, and sends trackpad, keyboard, navigation and volume commands over a WebSocket.
+
+It is built with:
+
+- **Electron** (castLabs' build, which adds Widevine DRM) for the window, the embedded websites and the remote server.
+- **React 19 + Vite + Tailwind CSS 4** for the home screen.
+- **uBlock Origin**, loaded as a Chrome extension, to block ads on the embedded websites.
+- **Plain HTML/CSS/JS** for the phone remote page (no build step).
+
+```
+┌──────────────────────────── Computer ─────────────────────────────┐
+│                                                                    │
+│  Main process (electron/main.cjs)                                  │
+│   ├─ Main window (BrowserWindow)                                   │
+│   │   ├─ Home screen renderer: React app (src/)    ← preload.cjs   │
+│   │   └─ In-app website (WebContentsView, sandboxed)               │
+│   │        ↑ uBlock Origin filters its requests                    │
+│   ├─ Pointer overlay (transparent BrowserWindow, pointer.html)     │
+│   ├─ Remote control (electron/remote/control.cjs)                  │
+│   ├─ Cursor hider (electron/cursor.cjs)                            │
+│   └─ Remote server: HTTP + WebSocket on port 8765                  │
+│        (electron/remote/server.cjs)                                │
+│                                ▲                                   │
+└────────────────────────────────┼───────────────────────────────────┘
+                                 │ same Wi‑Fi, http://<lan-ip>:8765/?t=<token>
+                      ┌──────────┴──────────┐
+                      │ Phone browser        │
+                      │ electron/remote/     │
+                      │ public/ (remote page)│
+                      └─────────────────────┘
+```
+
+## Folder layout
+
+```
+electron/
+  main.cjs                     Main process: startup, window, in-app websites, IPC, remote wiring, uBO, Widevine
+  preload.cjs                  Exposes window.tv to the React app
+  extension-shim.preload.cjs   Fixes that let uBlock Origin run in Electron
+  cursor.cjs                   Hides the computer's mouse cursor when idle (while a phone is connected)
+  remote/
+    server.cjs                 HTTP + WebSocket server, token, QR code
+    control.cjs                Turns phone commands into mouse/keyboard input and volume changes
+    pointer.html               The on-screen pointer drawn for the phone's trackpad
+    public/                    The phone remote page (index.html, remote.css, remote.js)
+src/
+  main.jsx, App.jsx            React entry point and root component
+  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus)
+  hooks/useWideImage.js        React hook around utils/wideImage.js
+  utils/wideImage.js           Turns square app icons into wide tiles on a canvas
+  data/apps.json               The list of streaming services on the home screen
+  index.css                    Tailwind setup, theme, animations
+public/                        App icons (copied as-is into dist/)
+scripts/fetch-ublock.cjs       Downloads uBlock Origin on npm install
+index.html, vite.config.js     Vite entry and config
+extensions/ublock-origin/      Downloaded uBlock Origin (git-ignored)
+dist/                          Vite build output (git-ignored)
+.venv-evs/                     Python venv for castLabs' signing tool (git-ignored)
+```
+
+All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "module"` for Vite and React.
+
+## Processes and windows
+
+| What | Created in | Runs | Has Node access? |
+|---|---|---|---|
+| Main process | Electron | `electron/main.cjs` and everything it requires | Yes |
+| Home screen renderer | `createWindow()` | The React app (`dist/index.html` or the Vite dev server) | No; only `window.tv` from `preload.cjs` |
+| In-app website | `createInAppController().open()` | Any streaming site | No; sandboxed, no app preload |
+| Pointer overlay | `createPointerOverlay()` in `control.cjs` | `electron/remote/pointer.html` | No; sandboxed |
+| uBlock Origin background page | `session.extensions.loadExtension()` | uBO's own code | No; gets `extension-shim.preload.cjs` |
+| Phone remote page | The phone's browser | `electron/remote/public/` | It's on another device |
+
+## Startup sequence
+
+`app.whenReady()` in [main.cjs](electron/main.cjs):
+
+1. **`startRemote()`** starts the phone remote server. It doesn't wait for it; `remoteReady` is a promise that resolves to the server (or `null` if it failed). IPC handlers that need the server wait on it.
+2. **`loadAdBlocker()` and `loadWidevine()`** run in parallel, and the window waits for both:
+   - uBlock Origin must be loaded before any site opens, or the first site would load unfiltered.
+   - Widevine must be installed before DRM video can play. On the first launch, `components.whenReady()` downloads it.
+3. **`createWindow()`** creates the main window, the in-app controller, the remote control and the cursor hider, then loads the home screen.
+
+On macOS, `activate` (clicking the Dock icon with no windows) creates the window again. On other systems, closing the last window quits.
+
+## Main window
+
+`createWindow()` creates a `BrowserWindow` with:
+
+- `fullscreen: true`: native macOS fullscreen, the same as the green button (its own Space, menu bar and Dock hidden).
+- `titleBarStyle: 'hiddenInset'` on macOS: no title bar, but the traffic-light buttons stay. The top bar leaves room for them with `pl-24`, and is a drag region (`app-drag` in [index.css](src/index.css)).
+- `contextIsolation: true`, `nodeIntegration: false` and `preload.cjs`, so the React app only sees `window.tv`.
+- `minWidth: 960`, `minHeight: 700`, black background.
+
+In development (`VITE_DEV_SERVER_URL` set by `npm run dev`), it loads `http://localhost:5173`. Otherwise it loads `dist/index.html`, which is why `npm start` builds first. Vite's `base: './'` makes asset paths relative so they work from `file://`.
+
+`window.open()` from the home screen is denied, and `http(s)` URLs open in the default browser instead.
+
+## In-app websites
+
+`createInAppController(win)` in [main.cjs](electron/main.cjs) shows one website at a time on top of the home screen.
+
+**Opening** (`open(url)`):
+
+1. Only `http:` and `https:` URLs are allowed (`isWebUrl`).
+2. Any open site is closed first.
+3. A `WebContentsView` is created with `sandbox: true`, `contextIsolation: true` and no preload, and added as a child view of the window.
+4. It is placed below the 56 px top bar (`TOP_BAR_HEIGHT`), so the React top bar with its Home button stays visible. **`TOP_BAR_HEIGHT` must match the top bar's `h-14` in [TopBar.jsx](src/components/TopBar.jsx).**
+5. Its user agent is Electron's with `Electron/…` and `tv/…` removed, so sites see plain Chrome and don't show "unsupported browser" pages.
+6. Pop-ups (`window.open`, `target="_blank"`) open in the default browser.
+7. It is registered with `electron-chrome-extensions` as the active tab, so uBlock Origin treats it like a browser tab.
+
+The home screen stays loaded underneath, so its state (which card is focused) is kept.
+
+**Video fullscreen.** When a page's video goes fullscreen (`enter-html-full-screen`), the view is resized to cover the top bar too. Because the window already starts fullscreen, it usually stays as it is. If the user had left window fullscreen, the window goes fullscreen just for the video; `ownsWindowFullscreen` remembers this so it can be undone when the video leaves fullscreen or the site closes.
+
+**Closing** (`close()`): removes the view, closes its `webContents`, undoes window fullscreen if the video owned it, sends `in-app:closed` to the React app, and focuses the home screen. Closing happens through the top bar's Home button, or the phone remote's Home button (or Back on the site's first page). The Esc key is deliberately left to the website (for example, to leave video fullscreen); it does not go home.
+
+**`page()`** returns `{ wc, htmlFullscreen }` for the open site, or `null`. The remote control and cursor hider use it to find the page.
+
+The window's `webContents.id` maps to its controller in `controllers`, so IPC messages reach the right window.
+
+## IPC between the home screen and the main process
+
+[preload.cjs](electron/preload.cjs) exposes `window.tv`:
+
+| `window.tv` method | Channel | Direction | Purpose |
+|---|---|---|---|
+| `openInApp(url)` | `in-app:open` | renderer → main | Open a site inside the window |
+| `closeInApp()` | `in-app:close` | renderer → main | Return to the home screen |
+| `onInAppClosed(cb)` | `in-app:closed` | main → renderer | The site was closed (by any means), so clear the app name in the top bar |
+| `getRemoteInfo()` | `remote:info` (invoke) | renderer → main | `{ url, qr, lanAvailable }` for the QR popup, or `null` if the server failed |
+| `getRemoteStatus()` | `remote:status` (invoke) | renderer → main | `{ available, connected }` |
+| `onRemoteStatus(cb)` | `remote:status` | main → renderer | Sent when a phone connects or disconnects |
+
+The `on…` methods return an unsubscribe function, which the React effects return as cleanup.
+
+If `window.tv` is missing (the React app opened in a plain browser tab with `npx vite`), the app still renders, and picking a card opens the site in a new tab.
+
+## Home screen (React)
+
+[App.jsx](src/App.jsx) holds the state:
+
+- `focused`: index of the focused card. Drives the hero title and the backdrop.
+- `openAppName`: name of the open site, shown in the top bar (null on the home screen).
+- `remoteConnected`: whether a phone is connected (green dot in the top bar).
+- `showRemotePrompt`: the QR popup. It opens on startup only if no phone is connected (the home screen also reloads on the remote's Refresh, while a phone is still connected), and closes automatically when a phone connects.
+
+Components:
+
+| Component | What it does |
+|---|---|
+| [TopBar](src/components/TopBar.jsx) | Drag region. Shows Home + app name while a site is open; the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock. |
+| [Hero](src/components/Hero.jsx) | Large title and tagline of the focused app. Keyed on the title so the entrance animation replays. |
+| [CardGrid](src/components/CardGrid.jsx) | 4 columns (6 on `xl`). Arrow keys move focus; the column count is read from the computed grid, so it follows the breakpoint. Keeps real DOM focus on the focused card so Enter/Space click it. Disabled while the QR popup is open. |
+| [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
+| [Backdrop](src/components/Backdrop.jsx) | Every app icon stacked, heavily blurred, cross-fading to the focused one, with a dark gradient on top. |
+| [Clock](src/components/Clock.jsx) | Time without AM/PM, updated every second. |
+| [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the URL, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
+| [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
+
+**Wide tiles.** App icons in `public/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
+
+**Styling.** Tailwind 4 through `@tailwindcss/vite`. [index.css](src/index.css) defines the font stack, the `ease-tv` easing, the `rise`/`fade`/`press` animations and the `app-drag`/`app-no-drag` utilities.
+
+### Adding a streaming service
+
+Add an entry to [src/data/apps.json](src/data/apps.json) and put its icon (square PNG) in `public/`:
+
+```json
+{
+  "name": "Example",
+  "img": "example.png",
+  "url": "https://www.example.com",
+  "tagline": "Short description",
+  "bg": "#000"
+}
+```
+
+`bg` is optional. `name` must be unique (it's the React key).
+
+## Phone remote
+
+### Server ([server.cjs](electron/remote/server.cjs))
+
+- **Address.** Listens on `0.0.0.0:8765`, or a random free port if 8765 is taken. The URL in the QR code uses the computer's LAN IPv4 address, preferring Wi‑Fi/Ethernet adapters (`en*`, `eth*`, `wl*`) over VPN and virtual ones, and skipping link-local `169.254.*`. With no network, it falls back to `localhost` and `lanAvailable: false`, which the QR popup warns about.
+- **Token.** A random 12-byte token (base64url) is created every launch and put in the URL (`?t=…`). WebSocket upgrades to `/ws` without the right token get `401`; the comparison is constant-time. The static files themselves are public, but useless without the token.
+- **Static files.** Only `/`, `/remote.css` and `/remote.js` are served (from `public/`), with `Cache-Control: no-store` so phones always get the current version. Anything else is 404.
+- **WebSocket.** `ws` with a 64 KB message limit. Each message is JSON with a string `t` field; anything else is ignored.
+- **API** returned to `main.cjs`: `url`, `qr` (PNG data URL), `lanAvailable`, `connectedCount()`, `broadcast(msg)` and `close()`.
+
+The traffic is plain HTTP on the local network. The token keeps out other devices that didn't see the QR code, but someone watching the Wi‑Fi traffic could read it.
+
+### Message protocol
+
+Phone → computer:
+
+| Message | Meaning |
+|---|---|
+| `{ t: 'move', dx, dy }` | Move the virtual pointer (clamped to ±400 per message) |
+| `{ t: 'click' }` | Left click at the pointer |
+| `{ t: 'scroll', dx, dy }` | Scroll at the pointer (clamped to ±2000) |
+| `{ t: 'key', key, repeat? }` | Press `Left`, `Right`, `Space`, `Enter` or `Backspace`, up to 100 times |
+| `{ t: 'text', text }` | Type text (up to 500 characters per message) |
+| `{ t: 'nav', action }` | `back`, `forward`, `home` or `refresh` |
+| `{ t: 'volume', value }` | Set volume 0–100 |
+| `{ t: 'mute', muted }` | Mute or unmute |
+| `{ t: 'power' }` | Quit the app |
+
+Computer → phone:
+
+| Message | Meaning |
+|---|---|
+| `{ t: 'state', volume, muted }` | Current volume. Sent to a phone when it connects, and to every phone when the volume changes. |
+
+`main.cjs` handles `power` itself (`shutDown()`: close the server, then `app.quit()`). Everything else goes to `remoteControl.handle()`.
+
+### Phone page ([public/](electron/remote/public/))
+
+[remote.js](electron/remote/public/remote.js) is a single script with no dependencies:
+
+- **Connection.** Reads the token from the page URL and connects to `/ws`. On disconnect it retries every 1.5 seconds; after 3 failures it says to rescan the QR code (a restarted app has a new token). It reconnects when the page becomes visible again (phones suspend background tabs).
+- **Trackpad.** Pointer events with pointer capture. One finger moves the pointer, with acceleration (`gain = 1.6 + min(speed / 6, 2.6)`): slow moves are precise, fast swipes go far. Two or more fingers scroll. Moves and scrolls are added up and sent once per animation frame. A tap (one finger, under 12 px of travel, under 300 ms) sends a click.
+- **Buttons.** `data-nav` buttons send `nav`, `data-key` buttons send `key`. Power asks for confirmation, then shows a "turned off" screen and stops reconnecting.
+- **Volume.** The slider sends at most every 60 ms while dragging, and once more on release. Incoming `state` messages don't move the slider while the user is dragging it.
+- **Typing.** A text box in a bottom sheet. On each change it compares the new text with what was sent so far and sends only the difference: backspaces for removed characters, then the added text. That way autocorrect and predictive text (which replace whole words) work. Backspace on an empty box deletes text on the TV. The Delete and Enter buttons cancel `pointerdown` so the phone keyboard stays open.
+
+### Remote control ([control.cjs](electron/remote/control.cjs))
+
+`createRemoteControl({ win, inApp, topBarHeight, onStateChange })` turns messages into input. It doesn't use OS-level input (no accessibility permission, no native modules): every event is sent straight to a page with `webContents.sendInputEvent()`.
+
+**Virtual pointer.** The pointer position lives in `cursor` (window content coordinates), starting at the window's center. It keeps fractions so slow movements add up. `mouseTarget()` decides where a mouse event goes:
+
+- With a site open and the pointer below the top bar (or anywhere, while a video is fullscreen): the site, with the y coordinate shifted up by the top bar height.
+- Otherwise: the home screen renderer, which draws the top bar.
+
+Clicks focus the target first, then send `mouseDown` + `mouseUp`. Scrolls send `mouseWheel`.
+
+**Pointer overlay.** Because the real cursor doesn't move, the pointer is drawn separately: a transparent, frameless, click-through (`setIgnoreMouseEvents(true)`), non-focusable child window over the main window's content area, kept in place on move/resize/fullscreen. [pointer.html](electron/remote/pointer.html) draws an arrow, positioned so its tip is exactly at the pointer, shrinks it briefly on click, and fades it out after 3 seconds without movement. It is created the first time the pointer is used.
+
+**Keys and text** go to the open site, or the home screen if none is open. The home screen's arrow keys move between cards; on sites, Left/Right/Space are the usual video player shortcuts. Text is sent as `char` events through the same input queue as key presses, so a Backspace followed by new text arrives in order.
+
+**Navigation.** `back` goes back in the site's history, or closes the site if it's on its first page. `forward` goes forward. `home` closes the site. `refresh` reloads the site, or the home screen if none is open.
+
+### Volume
+
+Volume has two modes, chosen fresh each time the volume changes and each time a phone connects (`checkVolumeMode()`):
+
+- **System mode** (macOS, when the output device has a volume: built-in speakers, headphones, most Bluetooth speakers). `osascript` reads and sets the Mac's output volume. This is what a TV remote would change.
+- **App mode** (other systems, and Macs sending audio over HDMI or DisplayPort). macOS turns its volume control off for HDMI and DisplayPort outputs; `get volume settings` returns `output volume:missing value`, so `readSystemVolume()` returns null. Instead, the app turns down its own audio. This can only make sound quieter than the TV's own volume setting.
+
+The remote's number is perceived loudness, not signal strength. `loudnessToLevel()` maps 0–100 to a gain of `(volume / 100) ^ 1.66`: a sound seems half as loud when it is 10 dB quieter, so 50 → −10 dB, 25 → −20 dB, 10 → −33 dB, 1 → −66 dB.
+
+In app mode, `applyPageVolume()`:
+
+- Mutes or unmutes the home screen and the site with `webContents.setAudioMuted()`.
+- Runs `scalePageVolume(level)` in every frame of the site. That function replaces the `volume` property on `HTMLMediaElement.prototype`. When the site sets a volume, the element really plays at `site volume × level`, but reading `volume` returns what the site set. So the site's own volume slider keeps working, and sites that reset their volume when a video loads (YouTube) can't undo the remote's level. Elements the site never touches are caught by capture-phase `loadstart` and `play` listeners on the document. Pages and frames that load later get it on `dom-ready` and `did-frame-finish-load` (through `app`'s `web-contents-created`).
+
+Switching from app mode back to system mode (for example, unplugging the TV) sets the app's level back to full, so sound isn't turned down twice. The app mode volume (`appVolume`) is kept separately and comes back if the output switches to the TV again.
+
+`osascript` calls run one at a time through `serialRunner()`, which keeps only the latest pending task, so dragging the slider doesn't queue hundreds of calls.
+
+## Cursor hider ([cursor.cjs](electron/cursor.cjs))
+
+While at least one phone is connected, the computer's own mouse cursor hides after 5 seconds without moving, so it doesn't sit on top of a video.
+
+- It checks `screen.getCursorScreenPoint()` every 250 ms. The phone remote never moves the real cursor (it sends events straight to pages), so only the real mouse counts as movement.
+- Hiding adds a constructed stylesheet (`*, *::before, *::after { cursor: none !important }`) to `document.adoptedStyleSheets` in every frame of the home screen and the open site. A constructed stylesheet is used because a site's Content Security Policy can block an injected `<style>` element, but not this. Showing removes it.
+- Pages and frames that load while it's hidden get the stylesheet on `dom-ready` / `did-frame-finish-load`. The home screen's `webContents` is hooked directly, because it was created before the `web-contents-created` listener.
+- `sendRemoteStatus()` in `main.cjs` turns it on or off whenever a phone connects or disconnects.
+
+It only affects the app's own pages; the cursor still shows over other apps and the menu bar.
+
+## Ad blocking (uBlock Origin)
+
+**Download.** [fetch-ublock.cjs](scripts/fetch-ublock.cjs) runs on `npm install` (`postinstall`). It downloads the official uBlock Origin Chromium build (version pinned in `VERSION`) from GitHub releases, unzips it (with `unzip`, or `tar` where there's no `unzip`) into `extensions/ublock-origin/`, and skips the download if that version is already there. A failed download prints a warning instead of failing `npm install`; the app then runs without the ad blocker. `npm run fetch:ublock` forces a fresh download.
+
+**Loading** (`loadAdBlocker()` in `main.cjs`). Electron only supports part of the Chrome extension APIs, so the [`electron-chrome-extensions`](https://github.com/samuelmaddock/electron-browser-shell/tree/master/packages/electron-chrome-extensions) library adds the rest (`browserAction`, `tabs`, `webNavigation`, …) to the default session. Each in-app site is registered as a tab (`addTab`, `selectTab`), so uBO knows which page a request belongs to.
+
+**Shim** ([extension-shim.preload.cjs](electron/extension-shim.preload.cjs)). Registered as a frame preload on the default session before `ElectronChromeExtensions` is created, so it runs before the library's own preload. It only does anything in extension pages (`chrome-extension:`) without context isolation, which means uBO's background page. It fixes two problems with uBlock Origin (a Manifest V2 extension) in Electron 45:
+
+1. The library adds the missing APIs to `window.chrome`, but Electron then replaces `window.chrome` with a new object before the extension's scripts run, so the APIs disappear and uBO crashes on startup. The shim defines a `chrome` getter/setter on the global object; when Electron assigns the new object, the shim copies over everything the library added or changed.
+2. Electron's `chrome.storage.managed` is the same object as `chrome.storage.local`. uBO reads "managed" (admin) settings and caches them into `storage.local`, so every launch nests the whole store inside itself: hundreds of MB per launch, and slower startups each time. The shim removes `storage.managed`, so uBO takes its normal "no admin settings" path.
+
+## DRM video (Widevine)
+
+Most streaming services encrypt video with Google's Widevine DRM. Stock Electron doesn't include Widevine, so the project uses castLabs' [Electron for Content Security](https://github.com/castlabs/electron-releases) (ECS), installed from GitHub in `package.json` (`electron: github:castlabs/electron-releases#v45.2.1+wvcus`). It's a drop-in replacement with an extra `components` API. Unlike stock Electron, the package doesn't download its binary during `npm install`; it downloads it into `node_modules/electron/dist` the first time Electron is launched.
+
+- `loadWidevine()` waits for `components.whenReady()`, which downloads or updates the Widevine module on first launch, then logs `Widevine ready`. On stock Electron, `components` is undefined and it logs `Widevine unavailable`.
+- **VMP signing.** Widevine has security levels. castLabs' builds are signed for development only, and services like Prime Video and Netflix reject that ("You are running an old or unsupported version of this browser"). castLabs' free EVS service signs the Electron app for production (Verified Media Path). The `evs:*` and `sign:vmp` scripts install castLabs' Python tool into `.venv-evs/` and sign `node_modules/electron/dist`. That folder only exists after the first launch, and reinstalling Electron replaces it, so signing happens after the first launch and again after every reinstall.
+
+## Build and scripts
+
+| Script | What it does |
+|---|---|
+| `npm run dev` | Starts Vite on port 5173 (`strictPort`) and, once it's up (`wait-on`), Electron with `VITE_DEV_SERVER_URL` set. React changes hot-reload; changes in `electron/` need a restart. `concurrently -k` stops both when either exits, so the remote's Power button stops Vite too. |
+| `npm run build` | Builds the React app into `dist/`. |
+| `npm start` | Builds, then runs Electron on `dist/`. |
+| `npm run fetch:ublock` | Re-downloads uBlock Origin. |
+| `npm run evs:setup` | Creates `.venv-evs` and installs castLabs' `castlabs-evs` tool. |
+| `npm run evs:signup` | Creates a castLabs EVS account (one time). |
+| `npm run sign:vmp` | Signs `node_modules/electron/dist` for production Widevine. |
+
+There's no packaging step (no installer or `.app` bundle); the app runs from the project folder.
+
+## Security model
+
+- **Websites** run in a sandboxed `WebContentsView` with context isolation and no app preload, so they can't reach Node or `window.tv`. Only `http(s)` URLs can be opened, and pop-ups go to the default browser.
+- **The home screen** has context isolation and only the small `window.tv` API.
+- **The phone remote** needs the per-launch token. It can control the app's pages (pointer, keys, text, navigation, volume) and quit the app, but can't reach other apps or the file system. The connection is unencrypted HTTP on the local network.
+- **The remote control** runs JavaScript in site frames (`executeJavaScript`) for the volume and cursor features; those scripts only touch media volume and stylesheets.
+
+## Things to keep in sync
+
+- `TOP_BAR_HEIGHT` in [main.cjs](electron/main.cjs) and the top bar's height (`h-14`, 56 px) in [TopBar.jsx](src/components/TopBar.jsx). The remote control also uses it to decide whether a click goes to the top bar or the site.
+- The Electron version in `package.json` and the castLabs release tag (`v45.2.1+wvcus`). After changing it, run `npm run sign:vmp` again.
+- `VERSION` in [fetch-ublock.cjs](scripts/fetch-ublock.cjs) when updating uBlock Origin, then run `npm run fetch:ublock`.
+- New remote commands: add the message to the phone page ([remote.js](electron/remote/public/remote.js)), handle it in `handle()` in [control.cjs](electron/remote/control.cjs) (or in `onMessage` in `main.cjs` for app-level ones like `power`), and validate and clamp its fields there.
