@@ -3,7 +3,7 @@
 // The trackpad moves a virtual pointer (drawn in a transparent, click-through
 // overlay window) and mouse/keyboard events are sent straight to the page under
 // it, so no OS accessibility permissions or native modules are needed.
-const { BrowserWindow } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 
@@ -20,13 +20,20 @@ const num = (n, limit) => (Number.isFinite(n) ? clamp(n, -limit, limit) : 0);
 
 /* ---------- Volume ---------- */
 
-// macOS: the system output volume (what a TV remote would change).
-// Elsewhere: the volume of audio/video elements in the open page.
-const useSystemVolume = process.platform === 'darwin';
+// Two modes:
+// - "system": the Mac's output volume, when its output device has one (built-in
+//   speakers, headphones, most Bluetooth speakers).
+// - "app": the volume of audio and video in the app. Used on other systems, and on
+//   a Mac sending sound over HDMI or DisplayPort (a TV or monitor): macOS turns its
+//   volume off there, because the TV is meant to set the loudness. App volume can
+//   only make sound quieter than the TV's own volume setting.
+const canUseSystemVolume = process.platform === 'darwin';
+const FULL_VOLUME = { volume: 100, muted: false };
 
 const osascript = (script) =>
   new Promise((resolve) => execFile('osascript', ['-e', script], (err, out) => resolve(err ? null : out.trim())));
 
+/** The Mac's output volume, or null if the output device has none (HDMI reports "missing value"). */
 async function readSystemVolume() {
   const out = await osascript('get volume settings'); // "output volume:50, ..., output muted:false"
   const volume = Number(/output volume:(\d+)/.exec(out ?? '')?.[1]);
@@ -34,23 +41,73 @@ async function readSystemVolume() {
   return Number.isFinite(volume) ? { volume, muted } : null;
 }
 
-/** Runs osascript calls one at a time, keeping only the latest pending one. */
+/** Runs async tasks one at a time, keeping only the latest pending one. */
 function serialRunner() {
   let running = false;
   let next = null;
   const run = async () => {
     running = true;
     while (next) {
-      const script = next;
+      const task = next;
       next = null;
-      await osascript(script);
+      await task();
     }
     running = false;
   };
-  return (script) => {
-    next = script;
+  return (task) => {
+    next = task;
     if (!running) run();
   };
+}
+
+/**
+ * Turns the remote's 0–100 into a signal level, so the number is how loud it
+ * sounds: 50 sounds half as loud as 100, and 1 sounds 1% as loud. Ears hear
+ * every 10 dB quieter as half as loud, which works out to level = fraction^1.66.
+ * (A straight volume / 100 would make 50 sound almost as loud as 100.)
+ */
+const LOUDNESS_EXPONENT = 1 / (2 * Math.log10(2)); // ≈ 1.66
+const loudnessToLevel = (volume) => Math.pow(clamp(volume, 0, 100) / 100, LOUDNESS_EXPONENT);
+
+/**
+ * Runs inside a web page: scales every audio/video element's volume by `level`.
+ * The scaling goes on top of whatever volume the site sets itself, so the site's
+ * own volume slider keeps working and a site resetting its volume (YouTube does
+ * when a video loads) can't undo it.
+ */
+function scalePageVolume(level) {
+  let tv = window.__tvVolume;
+  if (!tv) {
+    const proto = HTMLMediaElement.prototype;
+    const native = Object.getOwnPropertyDescriptor(proto, 'volume');
+    const siteVolume = new WeakMap(); // element -> the volume the site asked for
+    tv = window.__tvVolume = {
+      level: 1,
+      apply(media) {
+        if (!siteVolume.has(media)) siteVolume.set(media, native.get.call(media));
+        native.set.call(media, siteVolume.get(media) * tv.level);
+      },
+    };
+    Object.defineProperty(proto, 'volume', {
+      configurable: true,
+      enumerable: native.enumerable,
+      get() {
+        return siteVolume.has(this) ? siteVolume.get(this) : native.get.call(this);
+      },
+      set(value) {
+        const v = Number(value);
+        if (!(v >= 0 && v <= 1)) return native.set.call(this, value); // throws the usual error
+        native.set.call(this, v * tv.level);
+        siteVolume.set(this, v);
+      },
+    });
+    // Elements the site never set a volume on would play at full volume; catch them as they start.
+    for (const type of ['loadstart', 'play']) {
+      document.addEventListener(type, (e) => e.target instanceof HTMLMediaElement && tv.apply(e.target), true);
+    }
+  }
+  tv.level = level;
+  document.querySelectorAll('video, audio').forEach((m) => tv.apply(m));
 }
 
 /* ---------- Pointer overlay ---------- */
@@ -111,8 +168,10 @@ function createPointerOverlay(win) {
 function createRemoteControl({ win, inApp, topBarHeight, onStateChange }) {
   const pointer = createPointerOverlay(win);
   let cursor = null; // { x, y } in window content coordinates
-  let volumeState = { volume: 100, muted: false };
-  const runVolumeScript = serialRunner();
+  let volumeMode = null; // 'system' | 'app', set by checkVolumeMode()
+  let volumeState = FULL_VOLUME; // what the phone shows
+  let appVolume = FULL_VOLUME; // applied to the app's audio in "app" mode
+  const runVolumeTask = serialRunner();
 
   // Where a mouse event at the cursor should go: the open website (below the
   // top bar) or the home screen renderer (which also draws the top bar).
@@ -202,33 +261,63 @@ function createRemoteControl({ win, inApp, topBarHeight, onStateChange }) {
     }
   };
 
-  const applyPageVolume = () => {
-    const page = inApp.page();
-    const level = volumeState.volume / 100;
-    for (const wc of [win.webContents, page?.wc].filter(Boolean)) wc.setAudioMuted(volumeState.muted);
-    page?.wc
-      .executeJavaScript(`document.querySelectorAll('video, audio').forEach((m) => { m.volume = ${level}; }); 0`)
-      .catch(() => {});
+  // Applies a volume to the home screen and the open website (in every frame).
+  const applyPageVolume = (state, page = inApp.page()) => {
+    const level = loudnessToLevel(state.volume);
+    for (const wc of [win.webContents, page?.wc].filter(Boolean)) wc.setAudioMuted(state.muted);
+    for (const frame of page?.wc.mainFrame.framesInSubtree ?? []) {
+      frame.executeJavaScript(`(${scalePageVolume})(${level}); 0`).catch(() => {});
+    }
   };
 
-  const setVolume = (volume) => {
-    volumeState = { volume: clamp(Math.round(volume), 0, 100), muted: false };
-    if (useSystemVolume) runVolumeScript(`set volume output volume ${volumeState.volume} without output muted`);
-    else applyPageVolume();
-    onStateChange?.(volumeState);
+  // Websites opened (or frames loaded) in "app" mode get the app volume too.
+  const onWebContentsCreated = (_event, wc) => {
+    const reapply = () => {
+      const page = inApp.page();
+      if (volumeMode === 'app' && page?.wc === wc) applyPageVolume(appVolume, page);
+    };
+    wc.on('dom-ready', reapply);
+    wc.on('did-frame-finish-load', reapply);
+  };
+  app.on('web-contents-created', onWebContentsCreated);
+  win.on('closed', () => app.off('web-contents-created', onWebContentsCreated));
+
+  /**
+   * Picks "system" mode if the Mac's output device has a volume, otherwise "app"
+   * mode, and moves the volume between them when the output device changes.
+   * Returns the system volume in "system" mode.
+   */
+  const checkVolumeMode = async () => {
+    const system = canUseSystemVolume ? await readSystemVolume() : null;
+    const mode = system ? 'system' : 'app';
+    if (mode === 'app' && volumeMode !== 'app') applyPageVolume(appVolume);
+    if (mode === 'system' && volumeMode === 'app') applyPageVolume(FULL_VOLUME); // undo the app volume
+    volumeMode = mode;
+    return system;
   };
 
-  const setMuted = (muted) => {
-    volumeState = { ...volumeState, muted: Boolean(muted) };
-    if (useSystemVolume) runVolumeScript(`set volume ${volumeState.muted ? 'with' : 'without'} output muted`);
-    else applyPageVolume();
+  const setVolumeState = (next) => {
+    volumeState = next;
     onStateChange?.(volumeState);
+    runVolumeTask(async () => {
+      if (await checkVolumeMode()) {
+        await osascript(
+          next.muted ? 'set volume with output muted' : `set volume output volume ${next.volume} without output muted`,
+        );
+      } else {
+        appVolume = next;
+        applyPageVolume(appVolume);
+      }
+    });
   };
+
+  const setVolume = (volume) => setVolumeState({ volume: clamp(Math.round(volume), 0, 100), muted: false });
+  const setMuted = (muted) => setVolumeState({ ...volumeState, muted: Boolean(muted) });
 
   return {
-    /** Current volume, read fresh from the system on macOS. */
+    /** Current volume: the Mac's, read fresh, or the app's when the Mac's can't be changed. */
     async state() {
-      if (useSystemVolume) volumeState = (await readSystemVolume()) ?? volumeState;
+      volumeState = (await checkVolumeMode()) ?? appVolume;
       return volumeState;
     },
 

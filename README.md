@@ -82,7 +82,7 @@ The remote page runs in the phone's browser, so no app install is needed. It has
 - **Trackpad:** drag to move the on-screen pointer, tap to click, and swipe with two fingers to scroll.
 - **Back / Home / Forward:** move through the website's history, or return to the home screen.
 - **Skip back / Play-pause / Skip forward:** press the Left, Space and Right keys.
-- **Volume:** controls the Mac's system volume. On other systems it controls the video's volume.
+- **Volume:** controls the Mac's system volume. When that can't be changed (for example, on a TV connected by HDMI) or on other systems, it controls the app's own volume instead. See [Volume on a TV or monitor](#volume-on-a-tv-or-monitor).
 - **Type:** sends text to the selected text box on the TV.
 - **Refresh:** reloads the current page.
 - **Power:** quits the app and stops the remote server. In `npm run dev` it stops the Vite dev server too.
@@ -92,3 +92,25 @@ Notes:
 - The link includes a random code that changes every launch, so only phones that scanned the current QR code can connect. After restarting the app, scan the new code.
 - The remote server uses port 8765, or any free port if 8765 is busy. On first launch, macOS may ask whether to allow incoming connections; choose **Allow**.
 - The code lives in [electron/remote/](electron/remote/): `server.cjs` (server and QR code), `control.cjs` (turns remote commands into clicks and key presses), `pointer.html` (the on-screen pointer) and `public/` (the phone page).
+
+### Volume on a TV or monitor
+
+When a Mac sends sound to a TV or monitor over HDMI or DisplayPort, macOS turns off its own volume control. The volume keys and the menu bar slider stop working. The Mac sends sound at full level and expects the TV's own remote to set how loud it is.
+
+The phone remote handles this automatically. Each time you change the volume, the app checks whether the Mac's volume can be changed:
+
+- **It can** (built-in speakers, headphones, most Bluetooth speakers): the remote changes the Mac's system volume.
+- **It can't** (a TV or monitor over HDMI or DisplayPort): the remote changes the volume of sound played in the app. The home screen and website show no difference; videos just play quieter.
+
+The app volume can only make sound **quieter** than the TV's own setting, never louder. So the first time you connect to a TV:
+
+1. Set the remote's volume to 100.
+2. Use the TV's own remote to set the TV to the loudest volume you'd want.
+3. From then on, use the phone remote to turn it down from there.
+
+Notes:
+
+- The number is how loud it sounds compared with 100: 50 sounds half as loud, 10 sounds a tenth as loud, and 1 sounds 1% as loud. (The sound signal itself is turned down more than that, because ears hear a signal at half strength as only a little quieter.)
+- The site's own volume slider still works. The remote's volume is applied on top of it, so a site that resets its volume when a video loads (YouTube does) stays at the remote's level.
+- If you switch the Mac's sound output (for example, unplug the TV), the next volume change moves to the new mode. The app volume goes back to full, so sound isn't turned down twice.
+- The Mac's volume keys still can't change a TV's volume. Only the phone remote can.
