@@ -34,7 +34,9 @@ const chromeUserAgent = () => app.userAgentFallback.replace(/\s(Electron|tv)\/\S
  * The home screen stays loaded underneath so its state is kept.
  */
 function createInAppController(win) {
-  let current = null; // { view, htmlFullscreen }
+  // htmlFullscreen: a video on the page is fullscreen.
+  // ownsWindowFullscreen: the window went fullscreen only for that video, so undo it after.
+  let current = null; // { view, htmlFullscreen, ownsWindowFullscreen }
 
   const layout = () => {
     if (!current) return;
@@ -45,9 +47,9 @@ function createInAppController(win) {
 
   const close = () => {
     if (!current) return;
-    const { view, htmlFullscreen } = current;
+    const { view, ownsWindowFullscreen } = current;
     current = null;
-    if (htmlFullscreen && win.isFullScreen()) win.setFullScreen(false);
+    if (ownsWindowFullscreen && win.isFullScreen()) win.setFullScreen(false);
     win.contentView.removeChildView(view);
     view.webContents.close();
     if (!win.isDestroyed()) {
@@ -65,7 +67,7 @@ function createInAppController(win) {
     });
     view.setBackgroundColor('#000000');
     const wc = view.webContents;
-    current = { view, htmlFullscreen: false };
+    current = { view, htmlFullscreen: false, ownsWindowFullscreen: false };
 
     wc.setUserAgent(chromeUserAgent());
     wc.setWindowOpenHandler(({ url }) => {
@@ -84,13 +86,19 @@ function createInAppController(win) {
     wc.on('enter-html-full-screen', () => {
       if (!current) return;
       current.htmlFullscreen = true;
-      win.setFullScreen(true);
+      if (!win.isFullScreen()) {
+        current.ownsWindowFullscreen = true;
+        win.setFullScreen(true);
+      }
       layout();
     });
     wc.on('leave-html-full-screen', () => {
       if (!current) return;
       current.htmlFullscreen = false;
-      win.setFullScreen(false);
+      if (current.ownsWindowFullscreen) {
+        current.ownsWindowFullscreen = false;
+        win.setFullScreen(false);
+      }
       layout();
     });
 
@@ -132,6 +140,8 @@ function createWindow() {
     minWidth: 960,
     minHeight: 700,
     backgroundColor: '#000000',
+    // Start in native fullscreen (same as the green button on macOS: its own Space).
+    fullscreen: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       contextIsolation: true,
