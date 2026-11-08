@@ -89,6 +89,7 @@ The remote page runs in the phone's browser, so no app install is needed. It has
 
 Notes:
 
+- While a phone is connected, the computer's own mouse cursor hides after 5 seconds without moving, so it doesn't sit on top of a video. Move the mouse to bring it back. Using the phone's trackpad doesn't bring it back; the phone has its own on-screen pointer.
 - The link includes a random code that changes every launch, so only phones that scanned the current QR code can connect. After restarting the app, scan the new code.
 - The remote server uses port 8765, or any free port if 8765 is busy. On first launch, macOS may ask whether to allow incoming connections; choose **Allow**.
 - The code lives in [electron/remote/](electron/remote/): `server.cjs` (server and QR code), `control.cjs` (turns remote commands into clicks and key presses), `pointer.html` (the on-screen pointer) and `public/` (the phone page).

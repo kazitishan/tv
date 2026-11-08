@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { startRemoteServer } = require('./remote/server.cjs');
 const { createRemoteControl } = require('./remote/control.cjs');
+const { createCursorHider } = require('./cursor.cjs');
 
 // Unpacked uBlock Origin, downloaded by scripts/fetch-ublock.cjs (runs on npm install).
 const UBLOCK_PATH = path.join(__dirname, '..', 'extensions', 'ublock-origin');
@@ -161,12 +162,19 @@ function createWindow() {
     topBarHeight: TOP_BAR_HEIGHT,
     onStateChange: (state) => remote?.broadcast({ t: 'state', ...state }),
   });
+  // Hides the computer's mouse cursor after 5 seconds still, while a phone is connected.
+  cursorHider = createCursorHider({
+    win,
+    pages: () => [win.webContents, inApp.page()?.wc].filter(Boolean),
+  });
+  cursorHider.setEnabled(remoteStatus().connected);
 
   win.on('closed', () => {
     controllers.delete(id);
     if (mainWindow === win) {
       mainWindow = null;
       remoteControl = null;
+      cursorHider = null;
     }
   });
 
@@ -188,6 +196,7 @@ function createWindow() {
 
 let mainWindow = null;
 let remoteControl = null; // controls mainWindow
+let cursorHider = null; // for mainWindow
 let remote = null; // the running remote server
 let remoteReady = null; // resolves to the server, or null if it couldn't start
 let shuttingDown = false;
@@ -218,6 +227,7 @@ function startRemote() {
 const remoteStatus = () => ({ available: remote !== null, connected: (remote?.connectedCount() ?? 0) > 0 });
 
 function sendRemoteStatus() {
+  cursorHider?.setEnabled(remoteStatus().connected);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote:status', remoteStatus());
 }
 
