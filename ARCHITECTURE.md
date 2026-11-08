@@ -4,11 +4,14 @@ This document explains how the project works: what runs where, how the pieces ta
 
 ## Overview
 
-The app is a TV-style home screen for a computer plugged into a TV. It shows a grid of streaming services. Picking one opens the service's website inside the app window. A phone can act as the remote: it scans a QR code, opens a web page served by the app, and sends trackpad, keyboard, navigation and volume commands over a WebSocket.
+The app is a TV-style home screen for a computer plugged into a TV. It shows a grid of streaming services. Picking one opens the service's website inside the app window. A phone can act as the remote: it scans a QR code, opens a web page served by the remote server, and sends trackpad, keyboard, navigation, volume and power commands over a WebSocket.
+
+There are two processes. The **remote server** is a plain Node program that runs until it's stopped in the terminal. It serves the phone remote and starts and stops the **TV app** (Electron) as a child process when a phone presses Power. The TV app connects back to the server to receive the phones' commands.
 
 It is built with:
 
-- **Electron** (castLabs' build, which adds Widevine DRM) for the window, the embedded websites and the remote server.
+- **Electron** (castLabs' build, which adds Widevine DRM) for the window and the embedded websites.
+- **Node** (plain, outside Electron) for the remote server.
 - **React 19 + Vite + Tailwind CSS 4** for the home screen.
 - **uBlock Origin**, loaded as a Chrome extension, to block ads on the embedded websites.
 - **Plain HTML/CSS/JS** for the phone remote page (no build step).
@@ -16,19 +19,22 @@ It is built with:
 ```
 ┌──────────────────────────── Computer ─────────────────────────────┐
 │                                                                    │
-│  Main process (electron/main.cjs)                                  │
+│  Remote server (node electron/remote/server.cjs, always running)   │
+│   HTTP + WebSocket on port 8765                                    │
+│     │ starts / stops (child process)    ▲ /app WebSocket (loopback)│
+│     ▼                                   │                          │
+│  TV app: Electron main process (electron/main.cjs)                 │
+│   ├─ Link to the remote server (electron/remote/link.cjs)          │
 │   ├─ Main window (BrowserWindow)                                   │
 │   │   ├─ Home screen renderer: React app (src/)    ← preload.cjs   │
 │   │   └─ In-app website (WebContentsView, sandboxed)               │
 │   │        ↑ uBlock Origin filters its requests                    │
 │   ├─ Pointer overlay (transparent BrowserWindow, pointer.html)     │
 │   ├─ Remote control (electron/remote/control.cjs)                  │
-│   ├─ Cursor hider (electron/cursor.cjs)                            │
-│   └─ Remote server: HTTP + WebSocket on port 8765                  │
-│        (electron/remote/server.cjs)                                │
-│                                ▲                                   │
-└────────────────────────────────┼───────────────────────────────────┘
-                                 │ same Wi‑Fi, http://<lan-ip>:8765/?t=<token>
+│   └─ Cursor hider (electron/cursor.cjs)                            │
+│                                                                    │
+└────────────────────────────────▲───────────────────────────────────┘
+                                 │ same Wi‑Fi, http://<lan-ip>:8765/  (/ws)
                       ┌──────────┴──────────┐
                       │ Phone browser        │
                       │ electron/remote/     │
@@ -45,7 +51,8 @@ electron/
   extension-shim.preload.cjs   Fixes that let uBlock Origin run in Electron
   cursor.cjs                   Hides the computer's mouse cursor when idle (while a phone is connected)
   remote/
-    server.cjs                 HTTP + WebSocket server, token, QR code
+    server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
+    link.cjs                   The TV app's connection to the remote server
     control.cjs                Turns phone commands into mouse/keyboard input and volume changes
     pointer.html               The on-screen pointer drawn for the phone's trackpad
     public/                    The phone remote page (index.html, remote.css, remote.js)
@@ -64,13 +71,14 @@ dist/                          Vite build output (git-ignored)
 .venv-evs/                     Python venv for castLabs' signing tool (git-ignored)
 ```
 
-All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "module"` for Vite and React.
+All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "module"` for Vite and React. `server.cjs` lives in `electron/remote/` with the rest of the remote code, but runs in plain Node, not Electron.
 
 ## Processes and windows
 
 | What | Created in | Runs | Has Node access? |
 |---|---|---|---|
-| Main process | Electron | `electron/main.cjs` and everything it requires | Yes |
+| Remote server | `npm start` / `npm run dev` | `electron/remote/server.cjs` (plain Node) | Yes |
+| Main process | The remote server (`startTv()`) | `electron/main.cjs` and everything it requires | Yes |
 | Home screen renderer | `createWindow()` | The React app (`dist/index.html` or the Vite dev server) | No; only `window.tv` from `preload.cjs` |
 | In-app website | `createInAppController().open()` | Any streaming site | No; sandboxed, no app preload |
 | Pointer overlay | `createPointerOverlay()` in `control.cjs` | `electron/remote/pointer.html` | No; sandboxed |
@@ -79,15 +87,18 @@ All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "mod
 
 ## Startup sequence
 
-`app.whenReady()` in [main.cjs](electron/main.cjs):
+`npm start` (after building) and `npm run dev` (once Vite is up) run `node electron/remote/server.cjs`. The remote server listens on port 8765, prints the phone link, and starts Electron (`startTv()`). See [Remote server](#remote-server-servercjs).
 
-1. **`startRemote()`** starts the phone remote server. It doesn't wait for it; `remoteReady` is a promise that resolves to the server (or `null` if it failed). IPC handlers that need the server wait on it.
+Then `app.whenReady()` in [main.cjs](electron/main.cjs):
+
+1. **`startRemote()`** connects to the remote server (`createRemoteLink()`, using `TV_REMOTE_LINK` from the environment). It doesn't wait; `remote.ready` resolves once the server has sent the phone link and whether a phone is connected (or `null` after 3 seconds, or right away when Electron was started without the server). IPC handlers that need it wait on it.
 2. **`loadAdBlocker()` and `loadWidevine()`** run in parallel, and the window waits for both:
    - uBlock Origin must be loaded before any site opens, or the first site would load unfiltered.
    - Widevine must be installed before DRM video can play. On the first launch, `components.whenReady()` downloads it.
-3. **`createWindow()`** creates the main window, the in-app controller, the remote control and the cursor hider, then loads the home screen.
+3. **`createWindow()`** creates the main window, the in-app controller, the remote control and the cursor hider, then loads the home screen. If a phone is already connected (it turned the TV on), it gets the current volume.
+4. On macOS, `app.focus({ steal: true })` brings the app to the front, since it was started in the background by the server.
 
-On macOS, `activate` (clicking the Dock icon with no windows) creates the window again. On other systems, closing the last window quits.
+Closing the last window quits the app on every system (including macOS), so the remote server sees the TV as off and Power turns it back on.
 
 ## Main window
 
@@ -139,7 +150,7 @@ The window's `webContents.id` maps to its controller in `controllers`, so IPC me
 | `navigateInApp(action)` | `in-app:navigate` | renderer → main | `back`, `forward`, `refresh` or `stop` on the open site |
 | `onInAppNavState(cb)` | `in-app:nav-state` | main → renderer | `{ canGoBack, canGoForward, loading }` whenever the site navigates or starts/stops loading |
 | `onInAppClosed(cb)` | `in-app:closed` | main → renderer | The site was closed (by any means), so clear the app name and nav state in the top bar |
-| `getRemoteInfo()` | `remote:info` (invoke) | renderer → main | `{ url, qr, lanAvailable }` for the QR popup, or `null` if the server failed |
+| `getRemoteInfo()` | `remote:info` (invoke) | renderer → main | `{ url, qr, lanAvailable }` for the QR popup, or `null` if the remote server can't be reached |
 | `getRemoteStatus()` | `remote:status` (invoke) | renderer → main | `{ available, connected }` |
 | `onRemoteStatus(cb)` | `remote:status` | main → renderer | Sent when a phone connects or disconnects |
 
@@ -155,7 +166,7 @@ If `window.tv` is missing (the React app opened in a plain browser tab with `npx
 - `openAppName`: name of the open site, shown in the top bar (null on the home screen).
 - `navState`: `{ canGoBack, canGoForward, loading }` of the open site, from `in-app:nav-state`. Starts as loading when a site opens, and resets when it closes.
 - `remoteConnected`: whether a phone is connected (green dot in the top bar).
-- `showRemotePrompt`: the QR popup. It opens on startup only if no phone is connected (the home screen also reloads on the remote's Refresh, while a phone is still connected), and closes automatically when a phone connects.
+- `showRemotePrompt`: the QR popup. It is shown only while no phone is connected: on startup if none is (so not when a phone turned the TV on, or on the remote's Refresh), and 3 seconds after the last phone disconnects (`RECONNECT_GRACE_MS`, so a phone that drops for a moment doesn't flash it). It closes as soon as a phone connects. "Continue without connecting controller" closes it until the next time a phone connects and leaves.
 
 Components:
 
@@ -167,7 +178,7 @@ Components:
 | [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
 | [Backdrop](src/components/Backdrop.jsx) | Every app icon stacked, heavily blurred, cross-fading to the focused one, with a dark gradient on top. |
 | [Clock](src/components/Clock.jsx) | Day, date and time, like "Sun Nov 8 2:48 PM" (in the system's language and 12/24-hour setting), updated every second. |
-| [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the URL, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
+| [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the link, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
 | [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
 
 **Wide tiles.** App icons in `public/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
@@ -192,15 +203,36 @@ Add an entry to [src/data/apps.json](src/data/apps.json) and put its icon (squar
 
 ## Phone remote
 
-### Server ([server.cjs](electron/remote/server.cjs))
+### Remote server ([server.cjs](electron/remote/server.cjs))
 
-- **Address.** Listens on `0.0.0.0:8765`, or a random free port if 8765 is taken. The URL in the QR code uses the computer's LAN IPv4 address, preferring Wi‑Fi/Ethernet adapters (`en*`, `eth*`, `wl*`) over VPN and virtual ones, and skipping link-local `169.254.*`. With no network, it falls back to `localhost` and `lanAvailable: false`, which the QR popup warns about.
-- **Token.** A random 12-byte token (base64url) is created every launch and put in the URL (`?t=…`). WebSocket upgrades to `/ws` without the right token get `401`; the comparison is constant-time. The static files themselves are public, but useless without the token.
+A plain Node program, separate from Electron, that runs until it's stopped in the terminal (Ctrl+C, or `concurrently -k` stopping it in `npm run dev`). Keeping it outside the TV app is what lets the Power button turn the app off and back on, with phones staying connected the whole time.
+
+- **Address.** Listens on `0.0.0.0:8765` (or `TV_REMOTE_PORT`). If the port is taken, it exits with an error instead of picking another port, because the phone link must stay the same, and the port being taken usually means another copy is already running. The link uses the computer's LAN IPv4 address, preferring Wi‑Fi/Ethernet adapters (`en*`, `eth*`, `wl*`) over VPN and virtual ones, and skipping link-local `169.254.*`. With no network, it falls back to `localhost` and `lanAvailable: false`, which the QR popup warns about. The link is `http://<lan-ip>:8765/`, with no token, so it stays the same across restarts.
 - **Static files.** Only `/`, `/remote.css` and `/remote.js` are served (from `public/`), with `Cache-Control: no-store` so phones always get the current version. Anything else is 404.
-- **WebSocket.** `ws` with a 64 KB message limit. Each message is JSON with a string `t` field; anything else is ignored.
-- **API** returned to `main.cjs`: `url`, `qr` (PNG data URL), `lanAvailable`, `connectedCount()`, `broadcast(msg)` and `close()`.
+- **WebSockets.** `ws` with a 64 KB message limit, on two paths:
+  - `/ws` for phones. Open to anyone who can reach the port.
+  - `/app` for the TV app. Only accepted from loopback with the right key (`?k=`, a random key made each time the server starts and passed to Electron in `TV_REMOTE_LINK`; compared in constant time), so a phone can't pose as the app. Only one app connection at a time.
+- **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping is ignored. If the app exits any other way (Cmd+Q, closing the window, a crash), the state becomes `off`.
+- **Stopping the server.** `SIGINT`/`SIGTERM` closes every connection, stops the TV app and exits once it's gone (or after 5 seconds).
+- **Commands.** Phone messages are JSON with a string `t` field; anything else is ignored. `power` is handled by the server; everything else is forwarded to the TV app, or dropped while it's off.
 
-The traffic is plain HTTP on the local network. The token keeps out other devices that didn't see the QR code, but someone watching the Wi‑Fi traffic could read it.
+The traffic is plain HTTP on the local network, and there is no token: anyone on the same network who opens the link can use the remote, including turning the TV app on.
+
+### Link to the remote server ([link.cjs](electron/remote/link.cjs))
+
+`createRemoteLink({ url, onCommand, onPhoneConnected, onStatusChange, onQuit })` connects the TV app to the server's `/app` WebSocket, and reconnects every second if the connection drops. It returns `ready`, `info()` (`{ url, qr, lanAvailable }` for the QR popup), `connected()` (whether any phone is connected), `broadcast(msg)` and `close()`.
+
+Server → app:
+
+| Message | Meaning |
+|---|---|
+| `{ t: 'hello', url, qr, lanAvailable, connected }` | Sent on connect: the phone link, its QR code (PNG data URL), and whether a phone is already connected |
+| `{ t: 'status', connected }` | A phone connected or left |
+| `{ t: 'phone-connected' }` | A phone connected (or one was already connected when the app connected); the app replies with its volume state |
+| `{ t: 'command', msg }` | A phone command (see below) |
+| `{ t: 'quit' }` | Power was pressed; the app calls `app.quit()` |
+
+App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state`).
 
 ### Message protocol
 
@@ -216,23 +248,25 @@ Phone → computer:
 | `{ t: 'nav', action }` | `back`, `forward`, `home` or `refresh` |
 | `{ t: 'volume', value }` | Set volume 0–100 |
 | `{ t: 'mute', muted }` | Mute or unmute |
-| `{ t: 'power' }` | Quit the app |
+| `{ t: 'power' }` | Turn the TV app off or on (handled by the remote server) |
 
 Computer → phone:
 
 | Message | Meaning |
 |---|---|
-| `{ t: 'state', volume, muted }` | Current volume. Sent to a phone when it connects, and to every phone when the volume changes. |
+| `{ t: 'state', volume, muted }` | Current volume. Sent when a phone connects, when the TV app starts with a phone connected, and when the volume changes. Sent by the TV app, through the server. |
+| `{ t: 'tv', state }` | The TV app is `off`, `starting`, `on` or `stopping`. Sent by the server when a phone connects and whenever it changes. |
 
-`main.cjs` handles `power` itself (`shutDown()`: close the server, then `app.quit()`). Everything else goes to `remoteControl.handle()`.
+The remote server handles `power` itself. Everything else reaches `main.cjs` as a `command` and goes to `remoteControl.handle()`.
 
 ### Phone page ([public/](electron/remote/public/))
 
 [remote.js](electron/remote/public/remote.js) is a single script with no dependencies:
 
-- **Connection.** Reads the token from the page URL and connects to `/ws`. On disconnect it retries every 1.5 seconds; after 3 failures it says to rescan the QR code (a restarted app has a new token). It reconnects when the page becomes visible again (phones suspend background tabs).
+- **Connection.** Connects to `/ws`. On disconnect it retries every 1.5 seconds, forever; after 3 failures it says it can't reach the TV (the remote server was stopped, or the phone left the Wi‑Fi). It reconnects when the page becomes visible again (phones suspend background tabs).
 - **Trackpad.** Pointer events with pointer capture. One finger moves the pointer, with acceleration (`gain = 1.6 + min(speed / 6, 2.6)`): slow moves are precise, fast swipes go far. Two or more fingers scroll. Moves and scrolls are added up and sent once per animation frame. A tap (one finger, under 12 px of travel, under 300 ms) sends a click.
-- **Buttons.** `data-nav` buttons send `nav`, `data-key` buttons send `key`. Power asks for confirmation, then shows a "turned off" screen and stops reconnecting.
+- **Buttons.** `data-nav` buttons send `nav`, `data-key` buttons send `key`. Power asks for confirmation, then sends `power`.
+- **Off screen.** While the TV app is `off`, `starting` or `stopping` (from `tv` messages), a full-screen overlay covers the remote, with a large power button that turns the TV on (enabled only when `off`). The connection status stays visible above it.
 - **Volume.** The slider sends at most every 60 ms while dragging, and once more on release. Incoming `state` messages don't move the slider while the user is dragging it.
 - **Typing.** A text box in a bottom sheet. On each change it compares the new text with what was sent so far and sends only the difference: backspaces for removed characters, then the added text. That way autocorrect and predictive text (which replace whole words) work. Backspace on an empty box deletes text on the TV. The Delete and Enter buttons cancel `pointerdown` so the phone keyboard stays open.
 
@@ -278,7 +312,7 @@ While at least one phone is connected, the computer's own mouse cursor hides aft
 - It checks `screen.getCursorScreenPoint()` every 250 ms. The phone remote never moves the real cursor (it sends events straight to pages), so only the real mouse counts as movement.
 - Hiding adds a constructed stylesheet (`*, *::before, *::after { cursor: none !important }`) to `document.adoptedStyleSheets` in every frame of the home screen and the open site. A constructed stylesheet is used because a site's Content Security Policy can block an injected `<style>` element, but not this. Showing removes it.
 - Pages and frames that load while it's hidden get the stylesheet on `dom-ready` / `did-frame-finish-load`. The home screen's `webContents` is hooked directly, because it was created before the `web-contents-created` listener.
-- `sendRemoteStatus()` in `main.cjs` turns it on or off whenever a phone connects or disconnects.
+- `sendRemoteStatus()` in `main.cjs` turns it on or off whenever a phone connects or disconnects, and `createWindow()` sets it from the current status.
 
 It only affects the app's own pages; the cursor still shows over other apps and the menu bar.
 
@@ -304,9 +338,9 @@ Most streaming services encrypt video with Google's Widevine DRM. Stock Electron
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | Starts Vite on port 5173 (`strictPort`) and, once it's up (`wait-on`), Electron with `VITE_DEV_SERVER_URL` set. React changes hot-reload; changes in `electron/` need a restart. `concurrently -k` stops both when either exits, so the remote's Power button stops Vite too. |
+| `npm run dev` | Starts Vite on port 5173 (`strictPort`) and, once it's up (`wait-on`), the remote server with `VITE_DEV_SERVER_URL` set, which starts Electron. React changes hot-reload. Changes in `electron/` need the TV turned off and on (Power), except `server.cjs`, which needs `npm run dev` restarted. Power leaves Vite and the server running; `concurrently -k` stops both when either exits (Ctrl+C). |
 | `npm run build` | Builds the React app into `dist/`. |
-| `npm start` | Builds, then runs Electron on `dist/`. |
+| `npm start` | Builds, then starts the remote server, which runs Electron on `dist/`. |
 | `npm run fetch:ublock` | Re-downloads uBlock Origin. |
 | `npm run evs:setup` | Creates `.venv-evs` and installs castLabs' `castlabs-evs` tool. |
 | `npm run evs:signup` | Creates a castLabs EVS account (one time). |
@@ -318,7 +352,8 @@ There's no packaging step (no installer or `.app` bundle); the app runs from the
 
 - **Websites** run in a sandboxed `WebContentsView` with context isolation and no app preload, so they can't reach Node or `window.tv`. Only `http(s)` URLs can be opened, and pop-ups go to the default browser.
 - **The home screen** has context isolation and only the small `window.tv` API.
-- **The phone remote** needs the per-launch token. It can control the app's pages (pointer, keys, text, navigation, volume) and quit the app, but can't reach other apps or the file system. The connection is unencrypted HTTP on the local network.
+- **The phone remote** has no token: anyone on the local network who opens the link can use it. It can control the app's pages (pointer, keys, text, navigation, volume) and turn the TV app off and on, but can't reach other apps or the file system. The connection is unencrypted HTTP on the local network.
+- **The TV app's link** to the remote server only accepts loopback connections with the per-run key, so phones can't send it messages that pose as the server's.
 - **The remote control** runs JavaScript in site frames (`executeJavaScript`) for the volume and cursor features; those scripts only touch media volume and stylesheets.
 
 ## Things to keep in sync
@@ -326,4 +361,4 @@ There's no packaging step (no installer or `.app` bundle); the app runs from the
 - `TOP_BAR_HEIGHT` in [main.cjs](electron/main.cjs) and the top bar's height (`h-14`, 56 px) in [TopBar.jsx](src/components/TopBar.jsx). The remote control also uses it to decide whether a click goes to the top bar or the site.
 - The Electron version in `package.json` and the castLabs release tag (`v45.2.1+wvcus`). After changing it, run `npm run sign:vmp` again.
 - `VERSION` in [fetch-ublock.cjs](scripts/fetch-ublock.cjs) when updating uBlock Origin, then run `npm run fetch:ublock`.
-- New remote commands: add the message to the phone page ([remote.js](electron/remote/public/remote.js)), handle it in `handle()` in [control.cjs](electron/remote/control.cjs) (or in `onMessage` in `main.cjs` for app-level ones like `power`), and validate and clamp its fields there.
+- New remote commands: add the message to the phone page ([remote.js](electron/remote/public/remote.js)), handle it in `handle()` in [control.cjs](electron/remote/control.cjs) (or in the phone connection handler in [server.cjs](electron/remote/server.cjs) for ones that must work while the TV app is off, like `power`), and validate and clamp its fields there.

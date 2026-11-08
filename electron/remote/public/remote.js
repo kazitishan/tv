@@ -1,6 +1,5 @@
 (() => {
   const $ = (selector) => document.querySelector(selector);
-  const token = new URLSearchParams(location.search).get('t');
   const haptic = () => navigator.vibrate?.(8);
 
   /* ---------- Connection ---------- */
@@ -10,7 +9,7 @@
   let ws = null;
   let retryTimer = null;
   let failedAttempts = 0;
-  let poweredOff = false;
+  let tvState = null; // 'off' | 'starting' | 'on' | 'stopping', from the server
 
   const setStatus = (state, text) => {
     status.dataset.state = state;
@@ -22,13 +21,9 @@
   };
 
   function connect() {
-    if (!token) {
-      setStatus('error', 'Scan the QR code on the TV');
-      return;
-    }
     clearTimeout(retryTimer);
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${protocol}://${location.host}/ws?t=${encodeURIComponent(token)}`);
+    ws = new WebSocket(`${protocol}://${location.host}/ws`);
 
     ws.onopen = () => {
       failedAttempts = 0;
@@ -42,19 +37,52 @@
         return;
       }
       if (msg.t === 'state') applyVolumeState(msg);
+      else if (msg.t === 'tv') applyTvState(msg.state);
     };
     ws.onclose = () => {
       ws = null;
-      if (poweredOff) return;
       failedAttempts++;
-      // A restarted TV app has a new QR code, so this link stops working.
-      setStatus('wait', failedAttempts > 3 ? 'Can’t reach TV — rescan its QR code' : 'Reconnecting…');
+      // The remote server was stopped in the terminal, or the phone left the Wi-Fi.
+      setStatus('wait', failedAttempts > 3 ? 'Can’t reach the TV' : 'Reconnecting…');
       retryTimer = setTimeout(connect, 1500);
     };
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !ws && !poweredOff) connect();
+    if (document.visibilityState === 'visible' && !ws) connect();
+  });
+
+  /* ---------- Power ---------- */
+
+  const offScreen = $('#off-screen');
+  const powerOn = $('#power-on');
+  const OFF_SCREEN_TEXT = {
+    off: ['TV is off', 'Tap to turn it on.'],
+    starting: ['Turning on…', 'This takes a few seconds.'],
+    stopping: ['Turning off…', ''],
+  };
+
+  function applyTvState(state) {
+    tvState = state;
+    const text = OFF_SCREEN_TEXT[state];
+    offScreen.hidden = !text;
+    if (!text) return;
+    $('#off-title').textContent = text[0];
+    $('#off-text').textContent = text[1];
+    powerOn.disabled = state !== 'off';
+  }
+
+  // Power toggles the TV app; the remote server keeps running either way.
+  $('#power').addEventListener('click', () => {
+    if (!confirm('Turn off the TV?')) return;
+    send({ t: 'power' });
+    haptic();
+  });
+  powerOn.addEventListener('click', () => {
+    if (tvState !== 'off') return;
+    send({ t: 'power' });
+    applyTvState('starting'); // until the server confirms
+    haptic();
   });
 
   /* ---------- Trackpad ---------- */
@@ -147,15 +175,6 @@
       send({ t: 'key', key: button.dataset.key });
       haptic();
     });
-  });
-
-  $('#power').addEventListener('click', () => {
-    if (!confirm('Turn off the TV app?')) return;
-    poweredOff = true;
-    send({ t: 'power' });
-    clearTimeout(retryTimer);
-    setStatus('error', 'Turned off');
-    $('#off-screen').hidden = false;
   });
 
   /* ---------- Volume ---------- */

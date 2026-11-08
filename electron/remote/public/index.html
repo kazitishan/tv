@@ -112,9 +112,11 @@
     </div>
 
     <div class="off-screen" id="off-screen" hidden>
-      <svg viewBox="0 0 24 24"><path d="M12 3v9" /><path d="M17.66 6.34a8 8 0 1 1-11.32 0" /></svg>
-      <h1>TV app turned off</h1>
-      <p>Start the app again and scan its QR code to reconnect.</p>
+      <button class="power-on" id="power-on" aria-label="Turn on">
+        <svg viewBox="0 0 24 24"><path d="M12 3v9" /><path d="M17.66 6.34a8 8 0 1 1-11.32 0" /></svg>
+      </button>
+      <h1 id="off-title">TV is off</h1>
+      <p id="off-text">Tap to turn it on.</p>
     </div>
 
     <script src="remote.js"></script>

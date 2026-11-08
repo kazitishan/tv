@@ -434,11 +434,39 @@ input[type='range']::-moz-range-thumb {
   animation: fade 0.3s ease;
 }
 
-.off-screen svg {
-  width: 44px;
-  height: 44px;
-  margin-bottom: 14px;
+.power-on {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--green);
+  transition: transform 0.12s, background 0.12s, color 0.2s;
+}
+
+.power-on:active:not(:disabled) {
+  transform: scale(0.94);
+  background: var(--surface-pressed);
+}
+
+.power-on:disabled {
+  cursor: default;
   color: var(--muted);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.power-on svg {
+  width: 48px;
+  height: 48px;
+}
+
+/* The connection status stays visible above the off screen. */
+.status {
+  position: relative;
+  z-index: 21;
 }
 
 .off-screen h1 {
@@ -449,6 +477,12 @@ input[type='range']::-moz-range-thumb {
 .off-screen p {
   margin: 6px 0 0;
   color: var(--muted);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
 }
 
 @keyframes fade {

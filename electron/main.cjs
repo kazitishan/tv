@@ -2,7 +2,7 @@ const { app, BrowserWindow, WebContentsView, components, ipcMain, session, shell
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const fs = require('fs');
 const path = require('path');
-const { startRemoteServer } = require('./remote/server.cjs');
+const { createRemoteLink } = require('./remote/link.cjs');
 const { createRemoteControl } = require('./remote/control.cjs');
 const { createCursorHider } = require('./cursor.cjs');
 
@@ -196,6 +196,8 @@ function createWindow() {
     pages: () => [win.webContents, inApp.page()?.wc].filter(Boolean),
   });
   cursorHider.setEnabled(remoteStatus().connected);
+  // A phone that turned the TV on is already connected: give it the volume.
+  if (remoteStatus().connected) sendVolumeState();
 
   win.on('closed', () => {
     controllers.delete(id);
@@ -222,37 +224,30 @@ function createWindow() {
 
 /* ---------- Phone remote ---------- */
 
+// The remote server (electron/remote/server.cjs) is a separate process that
+// starts this app, and keeps running when the remote's Power button quits it.
+
 let mainWindow = null;
 let remoteControl = null; // controls mainWindow
 let cursorHider = null; // for mainWindow
-let remote = null; // the running remote server
-let remoteReady = null; // resolves to the server, or null if it couldn't start
-let shuttingDown = false;
+let remote = null; // link to the remote server
 
 function startRemote() {
-  remoteReady = startRemoteServer({
-    onMessage(msg) {
-      if (msg.t === 'power') shutDown();
-      else remoteControl?.handle(msg);
-    },
-    async onConnect(reply) {
-      sendRemoteStatus(); // closes the QR code popup and shows the green dot
-      if (remoteControl) reply({ t: 'state', ...(await remoteControl.state()) });
-    },
-    onDisconnect: sendRemoteStatus,
-  })
-    .then((server) => {
-      console.log(`Phone remote: ${server.url}`);
-      return (remote = server);
-    })
-    .catch((err) => {
-      console.error('Could not start the phone remote:', err);
-      return null;
-    });
+  remote = createRemoteLink({
+    url: process.env.TV_REMOTE_LINK,
+    onCommand: (msg) => remoteControl?.handle(msg),
+    onPhoneConnected: sendVolumeState,
+    onStatusChange: sendRemoteStatus, // closes the QR code popup and shows the green dot
+    onQuit: () => app.quit(), // Power button
+  });
 }
 
-/** Whether at least one phone is connected (`available` is false if the server failed). */
-const remoteStatus = () => ({ available: remote !== null, connected: (remote?.connectedCount() ?? 0) > 0 });
+async function sendVolumeState() {
+  if (remoteControl) remote?.broadcast({ t: 'state', ...(await remoteControl.state()) });
+}
+
+/** Whether at least one phone is connected (`available` is false without the remote server). */
+const remoteStatus = () => ({ available: Boolean(remote?.info()), connected: remote?.connected() ?? false });
 
 function sendRemoteStatus() {
   cursorHider?.setEnabled(remoteStatus().connected);
@@ -260,29 +255,13 @@ function sendRemoteStatus() {
 }
 
 ipcMain.handle('remote:status', async () => {
-  await remoteReady;
+  await remote?.ready;
   return remoteStatus();
 });
 
-ipcMain.handle('remote:info', async () => {
-  const server = await remoteReady;
-  return server && { url: server.url, qr: server.qr, lanAvailable: server.lanAvailable };
-});
+ipcMain.handle('remote:info', async () => (await remote?.ready) ?? null);
 
-/** Power button: stop the remote server, then quit the app. */
-async function shutDown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  const server = remote;
-  remote = null;
-  await server?.close().catch(() => {});
-  app.quit();
-}
-
-app.on('before-quit', () => {
-  remote?.close();
-  remote = null;
-});
+app.on('before-quit', () => remote?.close());
 
 /* ---------- Ad blocker ---------- */
 
@@ -329,11 +308,13 @@ app.whenReady().then(async () => {
   // seconds), and Widevine must be installed before DRM video can play.
   await Promise.all([loadAdBlocker(), loadWidevine()]);
   createWindow();
+  // Come to the front when turned on from the phone (the server starts the app in the background).
+  if (process.platform === 'darwin') app.focus({ steal: true });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+// Quit on every platform (not just Windows/Linux) so the phone remote sees the TV
+// as off and its Power button turns it back on.
+app.on('window-all-closed', () => app.quit());

@@ -23,6 +23,8 @@ Turn any pc/laptop into a tv with built in ad-blocking and use your phone as a r
    npm start      # or: build and run the production version
    ```
 
+   This starts the phone remote server, which then turns the TV app on. Keep the terminal open: the remote server runs until you press Ctrl+C there, so the phone can turn the TV off and back on.
+
    The first launch is slow: it downloads castLabs' Electron (about 100 MB) and Widevine, the DRM module. The terminal shows `Widevine ready` when it's done.
 
 4. **Sign Electron for DRM video (one time).** Netflix, Prime Video, Disney+ and similar services need this, or they refuse to play. Quit the app, then run:
@@ -35,7 +37,7 @@ Turn any pc/laptop into a tv with built in ad-blocking and use your phone as a r
 
    Run this after the first launch, because that's when Electron is downloaded. Then start the app again.
 
-5. **Connect your phone (optional).** Scan the QR code with your phone's camera. The phone must be on the same Wi‑Fi. To skip, choose **Continue without connecting controller**.
+5. **Connect your phone (optional).** Scan the QR code with your phone's camera. The phone must be on the same Wi‑Fi. To skip, choose **Continue without connecting controller**. The link (`http://<computer's IP>:8765/`) stays the same, so you can bookmark it or add it to your home screen.
 
 ## Quirks
 
@@ -45,9 +47,11 @@ Turn any pc/laptop into a tv with built in ad-blocking and use your phone as a r
 
 **Phone remote**
 
-- The QR code changes every launch. After restarting the app, scan it again.
-- The remote uses port 8765, or another free port if 8765 is busy.
-- The remote's Power button quits the app. In `npm run dev` it stops the dev server too.
+- The remote's link stays the same across restarts. It only changes if the computer's IP address on the network changes.
+- The remote uses port 8765. If that port is busy, the remote server won't start; set `TV_REMOTE_PORT` to use another port.
+- The remote's Power button turns the TV app off and on. The remote server keeps running until you press Ctrl+C in the terminal. In `npm run dev` the Vite dev server keeps running too.
+- The QR code shows only while no phone is connected, including a few seconds after the last phone disconnects.
+- The link has no password: anyone on the same Wi‑Fi who opens it can use the remote.
 - While a phone is connected, the computer's mouse cursor hides after 5 seconds without moving. Move the mouse to bring it back.
 
 **Volume on a TV**

@@ -13,12 +13,16 @@ const tv = window.tv;
 
 const INITIAL_NAV_STATE = { canGoBack: false, canGoForward: false, loading: true };
 
+// After the last phone disconnects, wait this long before showing the QR code, so
+// a phone that drops for a moment (screen lock, Wi-Fi hiccup) doesn't flash it.
+const RECONNECT_GRACE_MS = 3000;
+
 export default function App() {
   const [focused, setFocused] = useState(0);
   const [openAppName, setOpenAppName] = useState(null);
   const [remoteConnected, setRemoteConnected] = useState(false);
-  // The phone remote QR code popup. Opens on startup only if no phone is connected
-  // (the home screen also restarts on Refresh, while a phone may be connected).
+  // The phone remote QR code popup. Shown only while no phone is connected: on
+  // startup, and when the last phone leaves. Closes as soon as one connects.
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
   const current = apps[focused];
 
@@ -39,17 +43,28 @@ export default function App() {
   useEffect(() => {
     if (!tv?.getRemoteStatus) return;
     let alive = true;
-    tv.getRemoteStatus().then((status) => {
+    let wasConnected = null; // null until the first status
+    let showTimer = null;
+    const apply = ({ connected }) => {
       if (!alive) return;
-      setRemoteConnected(status.connected);
-      if (!status.connected) setShowRemotePrompt(true);
-    });
-    const unsubscribe = tv.onRemoteStatus((status) => {
-      setRemoteConnected(status.connected);
-      if (status.connected) setShowRemotePrompt(false); // QR code no longer needed
-    });
+      setRemoteConnected(connected);
+      if (connected) {
+        clearTimeout(showTimer);
+        setShowRemotePrompt(false); // QR code no longer needed
+      } else if (wasConnected === null) {
+        setShowRemotePrompt(true); // startup with no phone
+      } else if (wasConnected) {
+        // The last phone left. (Not on repeated "disconnected" statuses, so
+        // "Continue without connecting controller" keeps it closed.)
+        showTimer = setTimeout(() => setShowRemotePrompt(true), RECONNECT_GRACE_MS);
+      }
+      wasConnected = connected;
+    };
+    tv.getRemoteStatus().then(apply);
+    const unsubscribe = tv.onRemoteStatus(apply);
     return () => {
       alive = false;
+      clearTimeout(showTimer);
       unsubscribe();
     };
   }, []);

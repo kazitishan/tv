@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Startup popup with a QR code that opens the phone remote.
- * Closes when a phone connects, or with the "continue" button.
+ * Popup with a QR code that opens the phone remote, shown while no phone is
+ * connected. Closes when a phone connects, or with the "continue" button.
  */
 export default function RemotePrompt({ onClose }) {
   const [info, setInfo] = useState(undefined); // undefined = loading, null = unavailable
