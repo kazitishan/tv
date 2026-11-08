@@ -20,7 +20,7 @@ export default function App() {
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
   const current = apps[focused];
 
-  // The main process tells us when the in-app page closes (Home button or Esc).
+  // The main process tells us when the in-app page closes (Home button or the remote's Home/Back).
   useEffect(() => tv?.onInAppClosed(() => setOpenAppName(null)), []);
 
   useEffect(() => {

@@ -76,13 +76,6 @@ function createInAppController(win) {
       return { action: 'deny' };
     });
 
-    // Esc = "Menu" on a remote: go home (unless a video is fullscreen — then Esc exits that first).
-    wc.on('before-input-event', (event, input) => {
-      if (input.type === 'keyDown' && input.key === 'Escape' && current && !current.htmlFullscreen) {
-        event.preventDefault();
-        close();
-      }
-    });
 
     wc.on('enter-html-full-screen', () => {
       if (!current) return;

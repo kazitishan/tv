@@ -20,7 +20,6 @@ export default function TopBar({ openAppName, onHome, remoteConnected, onShowRem
               Home
             </button>
             <span className="text-[15px] font-semibold text-white/90">{openAppName}</span>
-            <span className="text-[13px] text-white/40">Esc to go back</span>
           </>
         )}
       </div>
