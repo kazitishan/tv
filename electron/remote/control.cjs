@@ -246,19 +246,10 @@ function createRemoteControl({ win, inApp, topBarHeight, onStateChange }) {
     }
   };
 
+  // Same as the top bar's buttons, except Refresh on the home screen reloads it.
   const navigate = (action) => {
-    const page = inApp.page();
-    if (action === 'home') return inApp.close();
-    if (action === 'refresh') return (page?.wc ?? win.webContents).reload();
-    if (!page) return;
-    const history = page.wc.navigationHistory;
-    if (action === 'back') {
-      // On the site's first page, Back returns to the home screen.
-      if (history.canGoBack()) history.goBack();
-      else inApp.close();
-    } else if (action === 'forward' && history.canGoForward()) {
-      history.goForward();
-    }
+    if (action === 'refresh' && !inApp.page()) return win.webContents.reload();
+    if (['back', 'forward', 'home', 'refresh'].includes(action)) inApp.navigate(action);
   };
 
   // Applies a volume to the home screen and the open website (in every frame).

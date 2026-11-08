@@ -11,6 +11,8 @@ const backdropImages = apps.map((app) => app.img);
 // Exposed by electron/preload.cjs; undefined when running in a plain browser.
 const tv = window.tv;
 
+const INITIAL_NAV_STATE = { canGoBack: false, canGoForward: false, loading: true };
+
 export default function App() {
   const [focused, setFocused] = useState(0);
   const [openAppName, setOpenAppName] = useState(null);
@@ -20,8 +22,19 @@ export default function App() {
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
   const current = apps[focused];
 
+  // Back / Forward / Refresh state of the open website, for the top bar.
+  const [navState, setNavState] = useState(INITIAL_NAV_STATE);
+
   // The main process tells us when the in-app page closes (Home button or the remote's Home/Back).
-  useEffect(() => tv?.onInAppClosed(() => setOpenAppName(null)), []);
+  useEffect(
+    () =>
+      tv?.onInAppClosed(() => {
+        setOpenAppName(null);
+        setNavState(INITIAL_NAV_STATE);
+      }),
+    []
+  );
+  useEffect(() => tv?.onInAppNavState?.(setNavState), []);
 
   useEffect(() => {
     if (!tv?.getRemoteStatus) return;
@@ -58,6 +71,8 @@ export default function App() {
       <TopBar
         openAppName={openAppName}
         onHome={() => tv?.closeInApp()}
+        navState={navState}
+        onNavigate={(action) => tv?.navigateInApp(action)}
         remoteConnected={remoteConnected}
         onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
       />

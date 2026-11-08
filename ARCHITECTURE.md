@@ -120,7 +120,9 @@ The home screen stays loaded underneath, so its state (which card is focused) is
 
 **Video fullscreen.** When a page's video goes fullscreen (`enter-html-full-screen`), the view is resized to cover the top bar too. Because the window already starts fullscreen, it usually stays as it is. If the user had left window fullscreen, the window goes fullscreen just for the video; `ownsWindowFullscreen` remembers this so it can be undone when the video leaves fullscreen or the site closes.
 
-**Closing** (`close()`): removes the view, closes its `webContents`, undoes window fullscreen if the video owned it, sends `in-app:closed` to the React app, and focuses the home screen. Closing happens through the top bar's Home button, or the phone remote's Home button (or Back on the site's first page). The Esc key is deliberately left to the website (for example, to leave video fullscreen); it does not go home.
+**Closing** (`close()`): removes the view, closes its `webContents`, undoes window fullscreen if the video owned it, sends `in-app:closed` to the React app, and focuses the home screen. Closing happens through the Home button (top bar or phone remote), or Back on the site's first page. The Esc key is deliberately left to the website (for example, to leave video fullscreen); it does not go home.
+
+**Navigation** (`navigate(action)`): the one place that handles browser-style navigation, used by both the top bar and the phone remote. `back` goes back in the site's history, or closes the site on its first page. `forward` goes forward if it can. `refresh` reloads, `stop` stops loading, and `home` closes the site. Whenever the site starts or stops loading or navigates (including in-page navigation in single-page apps), `sendNavState()` sends `{ canGoBack, canGoForward, loading }` to the React app, so the top bar can disable Forward and switch between Reload and Stop.
 
 **`page()`** returns `{ wc, htmlFullscreen }` for the open site, or `null`. The remote control and cursor hider use it to find the page.
 
@@ -134,7 +136,9 @@ The window's `webContents.id` maps to its controller in `controllers`, so IPC me
 |---|---|---|---|
 | `openInApp(url)` | `in-app:open` | renderer → main | Open a site inside the window |
 | `closeInApp()` | `in-app:close` | renderer → main | Return to the home screen |
-| `onInAppClosed(cb)` | `in-app:closed` | main → renderer | The site was closed (by any means), so clear the app name in the top bar |
+| `navigateInApp(action)` | `in-app:navigate` | renderer → main | `back`, `forward`, `refresh` or `stop` on the open site |
+| `onInAppNavState(cb)` | `in-app:nav-state` | main → renderer | `{ canGoBack, canGoForward, loading }` whenever the site navigates or starts/stops loading |
+| `onInAppClosed(cb)` | `in-app:closed` | main → renderer | The site was closed (by any means), so clear the app name and nav state in the top bar |
 | `getRemoteInfo()` | `remote:info` (invoke) | renderer → main | `{ url, qr, lanAvailable }` for the QR popup, or `null` if the server failed |
 | `getRemoteStatus()` | `remote:status` (invoke) | renderer → main | `{ available, connected }` |
 | `onRemoteStatus(cb)` | `remote:status` | main → renderer | Sent when a phone connects or disconnects |
@@ -149,6 +153,7 @@ If `window.tv` is missing (the React app opened in a plain browser tab with `npx
 
 - `focused`: index of the focused card. Drives the hero title and the backdrop.
 - `openAppName`: name of the open site, shown in the top bar (null on the home screen).
+- `navState`: `{ canGoBack, canGoForward, loading }` of the open site, from `in-app:nav-state`. Starts as loading when a site opens, and resets when it closes.
 - `remoteConnected`: whether a phone is connected (green dot in the top bar).
 - `showRemotePrompt`: the QR popup. It opens on startup only if no phone is connected (the home screen also reloads on the remote's Refresh, while a phone is still connected), and closes automatically when a phone connects.
 
@@ -156,7 +161,7 @@ Components:
 
 | Component | What it does |
 |---|---|
-| [TopBar](src/components/TopBar.jsx) | Drag region. Shows Home + app name while a site is open; the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock. |
+| [TopBar](src/components/TopBar.jsx) | Drag region. While a site is open, shows browser-style icon buttons (Home, Back, Forward, and Reload, which becomes Stop while loading; same icons as the phone remote) and the app name. Back is never disabled, because on the first page it goes home; Forward is disabled when there's nothing to go forward to. Also shows the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock. |
 | [Hero](src/components/Hero.jsx) | Large title and tagline of the focused app. Keyed on the title so the entrance animation replays. |
 | [CardGrid](src/components/CardGrid.jsx) | 4 columns (6 on `xl`). Arrow keys move focus; the column count is read from the computed grid, so it follows the breakpoint. Keeps real DOM focus on the focused card so Enter/Space click it. Disabled while the QR popup is open. |
 | [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
@@ -246,7 +251,7 @@ Clicks focus the target first, then send `mouseDown` + `mouseUp`. Scrolls send `
 
 **Keys and text** go to the open site, or the home screen if none is open. The home screen's arrow keys move between cards; on sites, Left/Right/Space are the usual video player shortcuts. Text is sent as `char` events through the same input queue as key presses, so a Backspace followed by new text arrives in order.
 
-**Navigation.** `back` goes back in the site's history, or closes the site if it's on its first page. `forward` goes forward. `home` closes the site. `refresh` reloads the site, or the home screen if none is open.
+**Navigation.** `back`, `forward`, `home` and `refresh` go to the in-app controller's `navigate()`, the same as the top bar's buttons (see [In-app websites](#in-app-websites)). The one difference: `refresh` with no site open reloads the home screen.
 
 ### Volume
 

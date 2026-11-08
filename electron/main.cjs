@@ -46,6 +46,37 @@ function createInAppController(win) {
     current.view.setBounds({ x: 0, y: top, width, height: height - top });
   };
 
+  // Tells the top bar which of Back / Forward / Refresh-or-Stop to show.
+  const sendNavState = () => {
+    if (!current || win.isDestroyed()) return;
+    const wc = current.view.webContents;
+    if (wc.isDestroyed()) return;
+    win.webContents.send('in-app:nav-state', {
+      canGoBack: wc.navigationHistory.canGoBack(),
+      canGoForward: wc.navigationHistory.canGoForward(),
+      loading: wc.isLoading(),
+    });
+  };
+
+  /** Browser-style navigation, used by the top bar and the phone remote. */
+  const navigate = (action) => {
+    if (action === 'home') return close();
+    if (!current) return;
+    const wc = current.view.webContents;
+    const history = wc.navigationHistory;
+    if (action === 'back') {
+      // On the site's first page, Back returns to the home screen.
+      if (history.canGoBack()) history.goBack();
+      else close();
+    } else if (action === 'forward') {
+      if (history.canGoForward()) history.goForward();
+    } else if (action === 'refresh') {
+      wc.reload();
+    } else if (action === 'stop') {
+      wc.stop();
+    }
+  };
+
   const close = () => {
     if (!current) return;
     const { view, ownsWindowFullscreen } = current;
@@ -76,6 +107,9 @@ function createInAppController(win) {
       return { action: 'deny' };
     });
 
+    for (const event of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page']) {
+      wc.on(event, sendNavState);
+    }
 
     wc.on('enter-html-full-screen', () => {
       if (!current) return;
@@ -119,13 +153,14 @@ function createInAppController(win) {
       ? { wc: current.view.webContents, htmlFullscreen: current.htmlFullscreen }
       : null;
 
-  return { open, close, page };
+  return { open, close, navigate, page };
 }
 
 const controllers = new Map(); // renderer webContents id -> in-app controller
 
 ipcMain.on('in-app:open', (event, url) => controllers.get(event.sender.id)?.open(url));
 ipcMain.on('in-app:close', (event) => controllers.get(event.sender.id)?.close());
+ipcMain.on('in-app:navigate', (event, action) => controllers.get(event.sender.id)?.navigate(action));
 
 function createWindow() {
   const win = new BrowserWindow({
