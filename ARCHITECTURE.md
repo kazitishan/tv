@@ -166,7 +166,7 @@ Components:
 | [CardGrid](src/components/CardGrid.jsx) | 4 columns (6 on `xl`). Arrow keys move focus; the column count is read from the computed grid, so it follows the breakpoint. Keeps real DOM focus on the focused card so Enter/Space click it. Disabled while the QR popup is open. |
 | [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
 | [Backdrop](src/components/Backdrop.jsx) | Every app icon stacked, heavily blurred, cross-fading to the focused one, with a dark gradient on top. |
-| [Clock](src/components/Clock.jsx) | Time without AM/PM, updated every second. |
+| [Clock](src/components/Clock.jsx) | Day, date and time, like "Sun Nov 8 2:48 PM" (in the system's language and 12/24-hour setting), updated every second. |
 | [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the URL, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
 | [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
 
