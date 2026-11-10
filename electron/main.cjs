@@ -33,8 +33,11 @@ const chromeUserAgent = () => app.userAgentFallback.replace(/\s(Electron|tv)\/\S
 /**
  * Shows a website inside the window, on top of the home screen, until closed.
  * The home screen stays loaded underneath so its state is kept.
+ * `onTextFocus(open)` is called when a text field on the site gets focus
+ * (true) or loses it (false), so the phone remote can show its keyboard, and
+ * `onTextHover(over)` when the pointer moves onto or off a text field.
  */
-function createInAppController(win) {
+function createInAppController(win, { onTextFocus, onTextHover } = {}) {
   // htmlFullscreen: a video on the page is fullscreen.
   // ownsWindowFullscreen: the window went fullscreen only for that video, so undo it after.
   let current = null; // { view, htmlFullscreen, ownsWindowFullscreen }
@@ -81,6 +84,8 @@ function createInAppController(win) {
     if (!current) return;
     const { view, ownsWindowFullscreen } = current;
     current = null;
+    onTextFocus?.(false);
+    onTextHover?.(false);
     if (ownsWindowFullscreen && win.isFullScreen()) win.setFullScreen(false);
     win.contentView.removeChildView(view);
     view.webContents.close();
@@ -95,7 +100,13 @@ function createInAppController(win) {
     close();
 
     const view = new WebContentsView({
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        // Only reports text field focus; exposes nothing to the site.
+        preload: path.join(__dirname, 'text-focus.preload.cjs'),
+      },
     });
     view.setBackgroundColor('#000000');
     const wc = view.webContents;
@@ -105,6 +116,13 @@ function createInAppController(win) {
     wc.setWindowOpenHandler(({ url }) => {
       openExternal(url);
       return { action: 'deny' };
+    });
+
+    wc.ipc.on('text-focus', (_event, open) => {
+      if (current?.view === view) onTextFocus?.(Boolean(open));
+    });
+    wc.ipc.on('text-hover', (_event, over) => {
+      if (current?.view === view) onTextHover?.(Boolean(over));
     });
 
     for (const event of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page']) {
@@ -180,7 +198,14 @@ function createWindow() {
   });
 
   const id = win.webContents.id;
-  const inApp = createInAppController(win);
+  const inApp = createInAppController(win, {
+    // Opens the phone remote's keyboard while a text field on the site has focus.
+    onTextFocus: (open) => remote?.broadcast({ t: 'keyboard', open }),
+    onTextHover: (over) => {
+      textHover.page = over;
+      sendTextHover();
+    },
+  });
   controllers.set(id, inApp);
 
   mainWindow = win;
@@ -188,6 +213,10 @@ function createWindow() {
     win,
     inApp,
     topBarHeight: TOP_BAR_HEIGHT,
+    onPointerOnPage: (onPage) => {
+      textHover.pointerOnPage = onPage;
+      sendTextHover();
+    },
     onStateChange: (state) => remote?.broadcast({ t: 'state', ...state }),
   });
   // Hides the computer's mouse cursor after 5 seconds still, while a phone is connected.
@@ -232,11 +261,26 @@ let remoteControl = null; // controls mainWindow
 let cursorHider = null; // for mainWindow
 let remote = null; // link to the remote server
 
+// Whether the phone's pointer is over a text field on the open website: the site
+// says what's under its pointer (page), but the pointer may have moved onto the
+// top bar since, which the site doesn't see (pointerOnPage).
+const textHover = { page: false, pointerOnPage: false, sent: false };
+
+function sendTextHover({ force = false } = {}) {
+  const over = textHover.page && textHover.pointerOnPage;
+  if (over === textHover.sent && !force) return;
+  textHover.sent = over;
+  remote?.broadcast({ t: 'textHover', over });
+}
+
 function startRemote() {
   remote = createRemoteLink({
     url: process.env.TV_REMOTE_LINK,
     onCommand: (msg) => remoteControl?.handle(msg),
-    onPhoneConnected: sendVolumeState,
+    onPhoneConnected: () => {
+      sendVolumeState();
+      sendTextHover({ force: true });
+    },
     onStatusChange: sendRemoteStatus, // closes the QR code popup and shows the green dot
     onQuit: () => app.quit(), // Power button
   });

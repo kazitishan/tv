@@ -38,6 +38,8 @@
       }
       if (msg.t === 'state') applyVolumeState(msg);
       else if (msg.t === 'tv') applyTvState(msg.state);
+      else if (msg.t === 'keyboard') applyTvKeyboard(msg.open);
+      else if (msg.t === 'textHover') pointerOverTextField = Boolean(msg.over);
     };
     ws.onclose = () => {
       ws = null;
@@ -91,6 +93,7 @@
   const touchDot = $('#touch-dot');
   const pointers = new Map(); // pointerId -> last { x, y }
   let gesture = null; // { start, travel, fingers }
+  let pointerOverTextField = false; // the TV's pointer is over a text field (from the TV)
   const pending = { mx: 0, my: 0, sx: 0, sy: 0 };
   let frame = 0;
 
@@ -155,10 +158,17 @@
       flush();
       send({ t: 'click' });
       haptic();
+      // Open the keyboard now, inside the tap: the TV's "text field focused"
+      // message arrives too late for the phone to show its keyboard.
+      if (pointerOverTextField) openKeyboardForTap();
     }
     gesture = null;
   };
   pad.addEventListener('pointerup', endPointer);
+  // iPhones show the keyboard reliably only for a focus() in touchend; focus again there.
+  pad.addEventListener('touchend', () => {
+    if (!sheet.hidden && document.activeElement !== input) input.focus();
+  });
   pad.addEventListener('pointercancel', endPointer);
 
   /* ---------- Buttons ---------- */
@@ -231,17 +241,51 @@
   const input = $('#type-input');
   let typed = ''; // what the TV has received so far
 
+  const PLACEHOLDER = input.placeholder;
+
   const openKeyboard = () => {
     sheet.hidden = false;
     input.value = '';
     typed = '';
-    input.focus(); // must happen inside the tap so the phone keyboard opens
+    input.focus(); // opens the phone keyboard only inside a tap (see applyTvKeyboard)
+    input.placeholder = document.activeElement === input ? PLACEHOLDER : 'Tap here to type…';
   };
   const closeKeyboard = () => {
+    clearTimeout(tapOpenTimer);
+    tapOpenTimer = null;
     input.blur();
     sheet.hidden = true;
   };
 
+  // Opened by a trackpad tap on a text field, before the TV confirms the field
+  // got focus. If it doesn't (the tap missed), close again unless typing started.
+  let tapOpenTimer = null;
+  const TAP_CONFIRM_MS = 2500;
+  function openKeyboardForTap() {
+    openKeyboard();
+    tapOpenTimer = setTimeout(() => {
+      tapOpenTimer = null;
+      if (!input.value) closeKeyboard();
+    }, TAP_CONFIRM_MS);
+  }
+
+  // A text field on the TV got focus (true) or lost it (false). Focus that didn't
+  // come from a trackpad tap (the site focused a field itself) opens the sheet
+  // without the phone keyboard, since phones only show it for a focus() inside a
+  // tap; iPhones then need one tap on the text box.
+  function applyTvKeyboard(open) {
+    if (open && tapOpenTimer) {
+      // The field this tap opened the keyboard for; keep what's been typed.
+      clearTimeout(tapOpenTimer);
+      tapOpenTimer = null;
+    } else if (open) {
+      openKeyboard();
+    } else if (!sheet.hidden) {
+      closeKeyboard();
+    }
+  }
+
+  input.addEventListener('focus', () => (input.placeholder = PLACEHOLDER));
   $('#open-keyboard').addEventListener('click', openKeyboard);
   $('#close-keyboard').addEventListener('click', closeKeyboard);
   $('#sheet-backdrop').addEventListener('click', closeKeyboard);
@@ -258,11 +302,13 @@
     typed = now;
   });
 
+  // Enter (or the keyboard's Go) submits on the TV and closes the keyboard.
   const pressEnter = () => {
     send({ t: 'key', key: 'Enter' });
     input.value = '';
     typed = '';
     haptic();
+    closeKeyboard();
   };
 
   input.addEventListener('keydown', (e) => {

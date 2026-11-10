@@ -165,7 +165,7 @@ function createPointerOverlay(win) {
  * `inApp.page()` returns { wc, htmlFullscreen } for the open website, or null.
  * `inApp.close()` returns to the home screen.
  */
-function createRemoteControl({ win, inApp, topBarHeight, onStateChange }) {
+function createRemoteControl({ win, inApp, topBarHeight, onPointerOnPage, onStateChange }) {
   const pointer = createPointerOverlay(win);
   let cursor = null; // { x, y } in window content coordinates
   let volumeMode = null; // 'system' | 'app', set by checkVolumeMode()
@@ -201,6 +201,7 @@ function createRemoteControl({ win, inApp, topBarHeight, onStateChange }) {
     cursor.x = clamp(cursor.x + dx, 0, width - 1);
     cursor.y = clamp(cursor.y + dy, 0, height - 1);
     const t = mouseTarget();
+    onPointerOnPage?.(t.wc !== win.webContents);
     t.wc.sendInputEvent({ type: 'mouseMove', x: t.x, y: t.y });
     pointer.move(Math.round(cursor.x), Math.round(cursor.y));
   };

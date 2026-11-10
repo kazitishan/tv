@@ -49,6 +49,7 @@ electron/
   main.cjs                     Main process: startup, window, in-app websites, IPC, remote wiring, uBO, Widevine
   preload.cjs                  Exposes window.tv to the React app
   extension-shim.preload.cjs   Fixes that let uBlock Origin run in Electron
+  text-focus.preload.cjs       Tells the main process when a text field on an in-app website has focus
   cursor.cjs                   Hides the computer's mouse cursor when idle (while a phone is connected)
   remote/
     server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
@@ -80,7 +81,7 @@ All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "mod
 | Remote server | `npm start` / `npm run dev` | `electron/remote/server.cjs` (plain Node) | Yes |
 | Main process | The remote server (`startTv()`) | `electron/main.cjs` and everything it requires | Yes |
 | Home screen renderer | `createWindow()` | The React app (`dist/index.html` or the Vite dev server) | No; only `window.tv` from `preload.cjs` |
-| In-app website | `createInAppController().open()` | Any streaming site | No; sandboxed, no app preload |
+| In-app website | `createInAppController().open()` | Any streaming site | No; sandboxed, only `text-focus.preload.cjs` (exposes nothing) |
 | Pointer overlay | `createPointerOverlay()` in `control.cjs` | `electron/remote/pointer.html` | No; sandboxed |
 | uBlock Origin background page | `session.extensions.loadExtension()` | uBO's own code | No; gets `extension-shim.preload.cjs` |
 | Phone remote page | The phone's browser | `electron/remote/public/` | It's on another device |
@@ -121,7 +122,7 @@ In development (`VITE_DEV_SERVER_URL` set by `npm run dev`), it loads `http://lo
 
 1. Only `http:` and `https:` URLs are allowed (`isWebUrl`).
 2. Any open site is closed first.
-3. A `WebContentsView` is created with `sandbox: true`, `contextIsolation: true` and no preload, and added as a child view of the window.
+3. A `WebContentsView` is created with `sandbox: true`, `contextIsolation: true` and [text-focus.preload.cjs](electron/text-focus.preload.cjs), and added as a child view of the window. The preload exposes nothing to the site; see [Text field focus](#text-field-focus).
 4. It is placed below the 56 px top bar (`TOP_BAR_HEIGHT`), so the React top bar with its Home button stays visible. **`TOP_BAR_HEIGHT` must match the top bar's `h-14` in [TopBar.jsx](src/components/TopBar.jsx).**
 5. Its user agent is Electron's with `Electron/…` and `tv/…` removed, so sites see plain Chrome and don't show "unsupported browser" pages.
 6. Pop-ups (`window.open`, `target="_blank"`) open in the default browser.
@@ -130,6 +131,8 @@ In development (`VITE_DEV_SERVER_URL` set by `npm run dev`), it loads `http://lo
 The home screen stays loaded underneath, so its state (which card is focused) is kept.
 
 **Video fullscreen.** When a page's video goes fullscreen (`enter-html-full-screen`), the view is resized to cover the top bar too. Because the window already starts fullscreen, it usually stays as it is. If the user had left window fullscreen, the window goes fullscreen just for the video; `ownsWindowFullscreen` remembers this so it can be undone when the video leaves fullscreen or the site closes.
+
+<a id="text-field-focus"></a>**Text field focus.** [text-focus.preload.cjs](electron/text-focus.preload.cjs) watches `focusin`/`focusout` in the site's main frame (including inside shadow roots) and sends `text-focus` over `wc.ipc` with `true` each time a different text field gets focus (text-like `<input>` types, `<textarea>`, `contenteditable`; not disabled or read-only), and `false` when focus leaves text fields or the page unloads. It also sends `true` when an already focused field is clicked, so the phone keyboard can be brought back after Done. Focus moving between two fields doesn't report `false` in between (it checks after the event). The controller passes these to `onTextFocus(open)`, which `main.cjs` broadcasts to the phones as `{ t: 'keyboard', open }`. Closing the site sends `false`. It also sends `text-hover` whenever the pointer moves onto or off a text field (or its `<label>`), which the controller passes to `onTextHover(over)`. `main.cjs` combines it with whether the phone's pointer is on the site at all (`onPointerOnPage` from the remote control, since the site doesn't see the pointer move onto the top bar) and broadcasts changes as `{ t: 'textHover', over }`. Fields inside iframes aren't detected (preloads only run in the main frame).
 
 **Closing** (`close()`): removes the view, closes its `webContents`, undoes window fullscreen if the video owned it, sends `in-app:closed` to the React app, and focuses the home screen. Closing happens through the Home button (top bar or phone remote), or Back on the site's first page. The Esc key is deliberately left to the website (for example, to leave video fullscreen); it does not go home.
 
@@ -232,7 +235,7 @@ Server → app:
 | `{ t: 'command', msg }` | A phone command (see below) |
 | `{ t: 'quit' }` | Power was pressed; the app calls `app.quit()` |
 
-App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state`).
+App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state` and `keyboard`).
 
 ### Message protocol
 
@@ -256,6 +259,8 @@ Computer → phone:
 |---|---|
 | `{ t: 'state', volume, muted }` | Current volume. Sent when a phone connects, when the TV app starts with a phone connected, and when the volume changes. Sent by the TV app, through the server. |
 | `{ t: 'tv', state }` | The TV app is `off`, `starting`, `on` or `stopping`. Sent by the server when a phone connects and whenever it changes. |
+| `{ t: 'textHover', over }` | Whether the pointer is over a text field on the open website. Sent when it changes and when a phone connects. Sent by the TV app, through the server. |
+| `{ t: 'keyboard', open }` | A text field on the open website got focus (`true`, sent again for each new field) or lost it (`false`). Sent by the TV app, through the server. |
 
 The remote server handles `power` itself. Everything else reaches `main.cjs` as a `command` and goes to `remoteControl.handle()`.
 
@@ -268,7 +273,10 @@ The remote server handles `power` itself. Everything else reaches `main.cjs` as 
 - **Buttons.** `data-nav` buttons send `nav`, `data-key` buttons send `key`. Power asks for confirmation, then sends `power`.
 - **Off screen.** While the TV app is `off`, `starting` or `stopping` (from `tv` messages), a full-screen overlay covers the remote, with a large power button that turns the TV on (enabled only when `off`). The connection status stays visible above it.
 - **Volume.** The slider sends at most every 60 ms while dragging, and once more on release. Incoming `state` messages don't move the slider while the user is dragging it.
-- **Typing.** A text box in a bottom sheet. On each change it compares the new text with what was sent so far and sends only the difference: backspaces for removed characters, then the added text. That way autocorrect and predictive text (which replace whole words) work. Backspace on an empty box deletes text on the TV. The Delete and Enter buttons cancel `pointerdown` so the phone keyboard stays open.
+- **Typing.** A text box in a bottom sheet. On each change it compares the new text with what was sent so far and sends only the difference: backspaces for removed characters, then the added text. That way autocorrect and predictive text (which replace whole words) work. Backspace on an empty box deletes text on the TV. The Delete and Enter buttons cancel `pointerdown` so the phone keyboard stays open. Enter (the button or the keyboard's Go) sends Enter to the TV and closes the sheet. Phones only show their keyboard for a `focus()` inside a tap, and `keyboard` arrives too late for that, so:
+  - A trackpad tap while `textHover` says the pointer is over a text field opens the sheet and focuses the box during the tap itself (in `pointerup`, and again in `touchend` for iPhones), so the keyboard is up right away. The `keyboard: true` that follows is the confirmation; if none arrives within 2.5 seconds (the tap missed) and nothing was typed, the sheet closes.
+  - Any other `keyboard: true` (the site focused a field itself) opens the sheet with an empty box but without the phone keyboard; iPhones show "Tap here to type…" and need one tap on the box.
+  - `keyboard: false` closes the sheet.
 
 ### Remote control ([control.cjs](electron/remote/control.cjs))
 
@@ -350,7 +358,7 @@ There's no packaging step (no installer or `.app` bundle); the app runs from the
 
 ## Security model
 
-- **Websites** run in a sandboxed `WebContentsView` with context isolation and no app preload, so they can't reach Node or `window.tv`. Only `http(s)` URLs can be opened, and pop-ups go to the default browser.
+- **Websites** run in a sandboxed `WebContentsView` with context isolation and only the text-focus preload (which exposes nothing), so they can't reach Node or `window.tv`. Only `http(s)` URLs can be opened, and pop-ups go to the default browser.
 - **The home screen** has context isolation and only the small `window.tv` API.
 - **The phone remote** has no token: anyone on the local network who opens the link can use it. It can control the app's pages (pointer, keys, text, navigation, volume) and turn the TV app off and on, but can't reach other apps or the file system. The connection is unencrypted HTTP on the local network.
 - **The TV app's link** to the remote server only accepts loopback connections with the per-run key, so phones can't send it messages that pose as the server's.
