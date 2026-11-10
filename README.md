@@ -39,6 +39,24 @@ Turn any pc/laptop into a tv with built in ad-blocking and use your phone as a r
 
 5. **Connect your phone (optional).** Scan the QR code with your phone's camera. The phone must be on the same Wi‑Fi. To skip, choose **Continue without connecting controller**. The link (`http://<computer's IP>:8765/`) stays the same, so you can bookmark it or add it to your home screen.
 
+## Updating
+
+1. **Stop the app.** Press Ctrl+C in the terminal where it's running.
+
+2. **Pull the latest changes and install any new dependencies:**
+
+   ```bash
+   cd tv
+   git pull
+   npm install
+   ```
+
+   If `git pull` complains about local changes, either commit them first or run `git stash` before pulling and `git stash pop` after.
+
+3. **Start the app again** with `npm run dev` or `npm start`.
+
+4. **Re-sign Electron if DRM video stops working.** If the update changed the Electron version, `npm install` replaces it and removes the signature. Launch the app once, quit it, then run `npm run sign:vmp`.
+
 ## Quirks
 
 **Setup and launch**
