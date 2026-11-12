@@ -14,6 +14,7 @@ const { spawn } = require('child_process');
 const QRCode = require('qrcode');
 const { WebSocketServer } = require('ws');
 const { applyUpdates } = require('../updates.cjs');
+const { keepAwake } = require('./keep-awake.cjs');
 
 const PORT = Number(process.env.TV_REMOTE_PORT) || 8765;
 const ROOT = path.join(__dirname, '..', '..'); // the Electron app (package.json "main")
@@ -284,5 +285,6 @@ server.listen(PORT, '0.0.0.0', async () => {
   remoteInfo = { url, qr, lanAvailable: host !== null };
   console.log(`Phone remote: ${url}`);
   console.log('Press Ctrl+C to stop the remote server.');
+  keepAwake();
   startTv();
 });

@@ -63,7 +63,9 @@ Click the **gear** at the top right of the TV's home screen. If there's an updat
 
 ## Keeping the laptop closed
 
-**Windows:** run this in Command Prompt so closing the lid does nothing instead of sleeping:
+While the app is running, the computer won't go to sleep on its own, and the screen stays on while the TV is on. Closing the lid still puts it to sleep unless you do this:
+
+**Windows:** run this in Command Prompt:
 
 ```bat
 powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0

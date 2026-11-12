@@ -55,6 +55,7 @@ electron/
   remote/
     server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
     link.cjs                   The TV app's connection to the remote server
+    keep-awake.cjs             Keeps the computer from sleeping while the remote server runs
     control.cjs                Turns phone commands into mouse/keyboard input and volume changes
     pointer.html               The on-screen pointer drawn for the phone's trackpad
     public/                    The phone remote page (index.html, remote.css, remote.js)
@@ -223,6 +224,7 @@ A plain Node program, separate from Electron, that runs until it's stopped in th
   - `/app` for the TV app. Only accepted from loopback with the right key (`?k=`, a random key made each time the server starts and passed to Electron in `TV_REMOTE_LINK`; compared in constant time), so a phone can't pose as the app. Only one app connection at a time.
 - **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping or updating is ignored. If the app exits any other way (Cmd+Q, closing the window, a crash), the state becomes `off`.
 - **Updates** (`updateAndRestart()`), when the TV app sends `update`: see [Updates](#updates).
+- **Keeping the computer awake** ([keep-awake.cjs](electron/remote/keep-awake.cjs)). Once listening, the server starts the system's own sleep blocker, which watches the server's PID and stops when it exits (even on `SIGKILL`): `caffeinate -i -w` on macOS, a hidden PowerShell holding `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` until `Wait-Process` returns on Windows, and `systemd-inhibit --what=idle:sleep` on Linux. It only stops idle *system* sleep, so a phone can turn the TV on at any time; the screen can still turn off. While the TV app runs, `powerSaveBlocker.start('prevent-display-sleep')` in `main.cjs` keeps the screen on too. Neither stops sleep from closing a laptop's lid (see the README).
 - **Stopping the server.** `SIGINT`/`SIGTERM` closes every connection, stops the TV app and exits once it's gone (or after 5 seconds).
 - **Commands.** Phone messages are JSON with a string `t` field; anything else is ignored. `power` is handled by the server; everything else is forwarded to the TV app, or dropped while it's off.
 

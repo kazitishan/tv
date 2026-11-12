@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, components, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, components, ipcMain, powerSaveBlocker, session, shell } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const fs = require('fs');
 const path = require('path');
@@ -369,6 +369,9 @@ async function loadWidevine() {
 }
 
 app.whenReady().then(async () => {
+  // Like a TV: the screen never dims or sleeps while the app is on, even with
+  // nothing playing. Released automatically when the app quits.
+  powerSaveBlocker.start('prevent-display-sleep');
   startRemote();
   // Before any page opens: uBO starts filtering once its lists are ready (a few
   // seconds), and Widevine must be installed before DRM video can play.
