@@ -322,6 +322,14 @@ async function loadAdBlocker() {
       filePath: path.join(__dirname, 'extension-shim.preload.cjs'),
     });
     extensions = new ElectronChromeExtensions({ session: ses });
+    // electron-chrome-extensions adds one 'destroyed' listener to an extension's
+    // background page per chrome.* event it subscribes to. uBO uses 11, just over
+    // Node's default limit of 10, which logs a false MaxListenersExceededWarning.
+    // The count is fixed (not a leak), so allow more, but still catch real leaks.
+    const raiseListenerLimit = (_event, wc) => {
+      if (wc.getType() === 'backgroundPage') wc.setMaxListeners(25);
+    };
+    app.on('web-contents-created', raiseListenerLimit);
     await ses.extensions.loadExtension(UBLOCK_PATH);
   } catch (err) {
     console.error('Failed to load uBlock Origin:', err);
