@@ -20,6 +20,12 @@
           <span id="status-text">Connecting…</span>
         </div>
         <div class="top-actions">
+          <button class="icon-btn" data-nav="back" aria-label="Back">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <button class="icon-btn" data-nav="forward" aria-label="Forward">
+            <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
+          </button>
           <button class="icon-btn" data-nav="refresh" aria-label="Refresh page">
             <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5" /><path d="M20 3.5v5h-5" /></svg>
           </button>
@@ -39,17 +45,17 @@
       </section>
 
       <section class="row nav-row">
-        <button class="key" data-nav="back">
-          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>
-          Back
+        <button class="key wrap" data-key="F" aria-label="Full screen">
+          <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
+          <span>Full screen</span>
         </button>
         <button class="key" data-nav="home">
           <svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" /></svg>
           Home
         </button>
-        <button class="key" data-nav="forward">
-          Forward
-          <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
+        <button class="key wrap" data-key="Escape" aria-label="Exit full screen">
+          <svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M20 15h-5v5M4 15h5v5" /></svg>
+          <span>Exit full screen</span>
         </button>
       </section>
 

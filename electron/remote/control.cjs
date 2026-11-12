@@ -13,6 +13,9 @@ const KEYS = {
   Space: { keyCode: 'Space', char: ' ' },
   Enter: { keyCode: 'Return', char: '\r' },
   Backspace: { keyCode: 'Backspace' },
+  // Lowercase: an uppercase letter keyCode would add Shift.
+  F: { keyCode: 'f', char: 'f' }, // video players' fullscreen shortcut
+  Escape: { keyCode: 'Escape' }, // leaves video fullscreen
 };
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));

@@ -161,6 +161,18 @@ svg.filled {
   height: 18px;
 }
 
+/* Two-word labels that wrap onto a second line on narrow phones. */
+.key.wrap {
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.key.wrap svg {
+  flex-shrink: 0;
+}
+
 .media-row {
   align-items: center;
   justify-items: center;

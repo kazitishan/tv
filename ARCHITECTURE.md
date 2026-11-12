@@ -255,7 +255,7 @@ Phone → computer:
 | `{ t: 'move', dx, dy }` | Move the virtual pointer (clamped to ±400 per message) |
 | `{ t: 'click' }` | Left click at the pointer |
 | `{ t: 'scroll', dx, dy }` | Scroll at the pointer (clamped to ±2000) |
-| `{ t: 'key', key, repeat? }` | Press `Left`, `Right`, `Space`, `Enter` or `Backspace`, up to 100 times |
+| `{ t: 'key', key, repeat? }` | Press `Left`, `Right`, `Space`, `Enter`, `Backspace`, `F` or `Escape`, up to 100 times |
 | `{ t: 'text', text }` | Type text (up to 500 characters per message) |
 | `{ t: 'nav', action }` | `back`, `forward`, `home` or `refresh` |
 | `{ t: 'volume', value }` | Set volume 0–100 |
@@ -300,7 +300,7 @@ Clicks focus the target first, then send `mouseDown` + `mouseUp`. Scrolls send `
 
 **Pointer overlay.** Because the real cursor doesn't move, the pointer is drawn separately: a transparent, frameless, click-through (`setIgnoreMouseEvents(true)`), non-focusable child window over the main window's content area, kept in place on move/resize/fullscreen. [pointer.html](electron/remote/pointer.html) draws an arrow, positioned so its tip is exactly at the pointer, shrinks it briefly on click, and fades it out after 3 seconds without movement. It is created the first time the pointer is used.
 
-**Keys and text** go to the open site, or the home screen if none is open. The home screen's arrow keys move between cards; on sites, Left/Right/Space are the usual video player shortcuts. Text is sent as `char` events through the same input queue as key presses, so a Backspace followed by new text arrives in order.
+**Keys and text** go to the open site, or the home screen if none is open. The home screen's arrow keys move between cards; on sites, Left/Right/Space are the usual video player shortcuts, and the phone's Full screen and Exit full screen buttons press F and Esc. Text is sent as `char` events through the same input queue as key presses, so a Backspace followed by new text arrives in order.
 
 **Navigation.** `back`, `forward`, `home` and `refresh` go to the in-app controller's `navigate()`, the same as the top bar's buttons (see [In-app websites](#in-app-websites)). The one difference: `refresh` with no site open reloads the home screen.
 
