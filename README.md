@@ -60,3 +60,17 @@ Click the **gear** at the top right of the TV's home screen. If there's an updat
 
 - On a Mac, the volume keys may stop working when sound goes to a TV or monitor over HDMI or DisplayPort.
 - The phone remote's volume works anyway, but it can only make sound quieter than the TV's own setting, not louder. Set the TV or monitor volume to the loudest you'd want, then turn it down from your phone.
+
+## Keeping the laptop closed
+
+**Windows:** run this in Command Prompt so closing the lid does nothing instead of sleeping:
+
+```bat
+powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+powercfg /setactive SCHEME_CURRENT
+```
+
+To undo it, run the same commands with `1` instead of `0`.
+
+**Mac:** use clamshell mode. Connect the charger, the TV or monitor, and an external keyboard and mouse, then close the lid. Without the keyboard and mouse, the Mac goes to sleep when you close the lid.
