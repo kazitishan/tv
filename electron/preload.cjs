@@ -27,4 +27,11 @@ contextBridge.exposeInMainWorld('tv', {
     ipcRenderer.on('remote:status', listener);
     return () => ipcRenderer.removeListener('remote:status', listener);
   },
+
+  // Updates (gear button). checkForUpdates() resolves to
+  // { app: { behind, commits } | { error }, ublock: { installed, latest, available } | null,
+  //   canInstall, lastError }.
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  // Turns the TV off, updates and turns it back on. Resolves to false if it can't.
+  installUpdates: () => ipcRenderer.invoke('update:install'),
 });

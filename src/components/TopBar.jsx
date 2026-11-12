@@ -13,6 +13,12 @@ const ICONS = {
     </>
   ),
   stop: <path d="M6 6l12 12M18 6 6 18" />,
+  gear: (
+    <>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
 };
 
 /** A round icon button for the top bar. */
@@ -38,7 +44,15 @@ function NavButton({ icon, label, onClick, disabled = false }) {
  * name; the in-app page sits just below it.
  * Its height must match TOP_BAR_HEIGHT in electron/main.cjs.
  */
-export default function TopBar({ openAppName, onHome, navState, onNavigate, remoteConnected, onShowRemote }) {
+export default function TopBar({
+  openAppName,
+  onHome,
+  navState,
+  onNavigate,
+  remoteConnected,
+  onShowRemote,
+  onShowUpdates,
+}) {
   return (
     <header className="app-drag relative z-1 flex h-14 shrink-0 items-center justify-between pr-14 pl-24">
       <div className="flex items-center gap-1">
@@ -80,6 +94,8 @@ export default function TopBar({ openAppName, onHome, navState, onNavigate, remo
           </button>
         )}
         <Clock />
+        {/* Update check (home screen only, like the phone button). */}
+        {onShowUpdates && !openAppName && <NavButton icon="gear" label="Check for updates" onClick={onShowUpdates} />}
       </div>
     </header>
   );

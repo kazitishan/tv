@@ -5,6 +5,7 @@ import CardGrid from './components/CardGrid.jsx';
 import Hero from './components/Hero.jsx';
 import RemotePrompt from './components/RemotePrompt.jsx';
 import TopBar from './components/TopBar.jsx';
+import UpdatePopup from './components/UpdatePopup.jsx';
 
 const backdropImages = apps.map((app) => app.img);
 
@@ -24,6 +25,7 @@ export default function App() {
   // The phone remote QR code popup. Shown only while no phone is connected: on
   // startup, and when the last phone leaves. Closes as soon as one connects.
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
+  const [showUpdates, setShowUpdates] = useState(false); // the gear button's popup
   const current = apps[focused];
 
   // Back / Forward / Refresh state of the open website, for the top bar.
@@ -90,6 +92,7 @@ export default function App() {
         onNavigate={(action) => tv?.navigateInApp(action)}
         remoteConnected={remoteConnected}
         onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
+        onShowUpdates={tv?.checkForUpdates ? () => setShowUpdates(true) : null}
       />
 
       <Hero title={current.name} subtitle={current.tagline} />
@@ -99,10 +102,11 @@ export default function App() {
         focusedIndex={focused}
         onFocusChange={setFocused}
         onSelect={openApp}
-        active={!showRemotePrompt}
+        active={!showRemotePrompt && !showUpdates}
       />
 
       {showRemotePrompt && <RemotePrompt onClose={() => setShowRemotePrompt(false)} />}
+      {showUpdates && !showRemotePrompt && <UpdatePopup onClose={() => setShowUpdates(false)} />}
     </div>
   );
 }

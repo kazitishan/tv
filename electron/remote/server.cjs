@@ -13,6 +13,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const QRCode = require('qrcode');
 const { WebSocketServer } = require('ws');
+const { applyUpdates } = require('../updates.cjs');
 
 const PORT = Number(process.env.TV_REMOTE_PORT) || 8765;
 const ROOT = path.join(__dirname, '..', '..'); // the Electron app (package.json "main")
@@ -23,6 +24,9 @@ const FILES = {
   '/remote.js': ['remote.js', 'text/javascript; charset=utf-8'],
 };
 const QUIT_TIMEOUT_MS = 10_000; // force-kill the TV app if it hasn't quit by then
+// Exit code that asks scripts/start.cjs to start this server again (after an update).
+const RESTART_CODE = 75;
+const supervised = process.env.TV_SUPERVISED === '1'; // started by scripts/start.cjs
 
 /** This computer's IPv4 address on the local network, or null if offline. */
 function lanAddress() {
@@ -66,9 +70,11 @@ let appSocket = null; // the running TV app's connection
 let remoteInfo = null; // { url, qr, lanAvailable }, sent to the TV app for its QR popup
 let port = PORT;
 
-// The TV app process. state: 'off' | 'starting' | 'on' | 'stopping'
+// The TV app process. state: 'off' | 'starting' | 'on' | 'stopping' | 'updating'
 const tv = { child: null, state: 'off', killTimer: null };
 let exiting = false;
+let updating = false;
+let updateError = null; // why the last update failed, shown in the TV app's update popup
 
 const broadcast = (msg) => {
   for (const ws of phones) sendTo(ws, msg);
@@ -107,6 +113,7 @@ function startTv() {
     clearTimeout(tv.killTimer);
     appSocket = null;
     if (exiting) process.exit(0);
+    if (updating) return; // updateAndRestart() takes it from here
     console.log('The TV is off. Press Power on the phone remote to turn it on.');
     setTvState('off');
   };
@@ -132,7 +139,47 @@ function stopTv() {
 function togglePower() {
   if (tv.state === 'off') startTv();
   else if (tv.state === 'starting' || tv.state === 'on') stopTv();
-  // 'stopping': already turning off; ignore
+  // 'stopping' or 'updating': ignore
+}
+
+/* ---------- Updates ---------- */
+
+/**
+ * Turns the TV app off, installs updates (git pull, npm install, uBlock Origin),
+ * then exits so scripts/start.cjs starts the new version, which turns the TV
+ * back on. If the update fails, the TV is turned back on as it was.
+ */
+async function updateAndRestart() {
+  if (updating || exiting) return;
+  updating = true;
+  updateError = null;
+  const tvGone = tv.child ? new Promise((resolve) => tv.child.once('exit', resolve)) : null;
+  stopTv();
+  setTvState('updating');
+  await tvGone;
+  console.log('Updating');
+
+  try {
+    await applyUpdates();
+  } catch (err) {
+    console.error('Update failed:', err.message);
+    updateError = err.message;
+    updating = false;
+    startTv();
+    return;
+  }
+  if (exiting) return;
+
+  if (!supervised) {
+    // Started some other way: the TV app is new, but this server's code is the old one.
+    console.log('Updated. Restart this terminal command to finish updating the remote server.');
+    updating = false;
+    startTv();
+    return;
+  }
+  console.log('Updated. Restarting');
+  for (const ws of phones) ws.terminate(); // they reconnect to the new server
+  process.exit(RESTART_CODE); // frees the port for the new server
 }
 
 /* ---------- HTTP + WebSocket ---------- */
@@ -185,13 +232,15 @@ phoneWss.on('connection', (ws) => {
 appWss.on('connection', (ws) => {
   appSocket?.terminate(); // only one TV app at a time
   appSocket = ws;
-  sendToApp({ t: 'hello', ...remoteInfo, connected: phones.size > 0 });
+  // `updates`: this server installs updates (older ones ignore `update`).
+  sendToApp({ t: 'hello', ...remoteInfo, connected: phones.size > 0, updates: true, updateError });
   if (phones.size > 0) sendToApp({ t: 'phone-connected' });
   if (tv.state === 'starting') setTvState('on');
 
   ws.on('message', (data) => {
     const msg = parse(data);
     if (msg?.t === 'broadcast' && msg.msg) broadcast(msg.msg);
+    else if (msg?.t === 'update') updateAndRestart();
   });
   ws.on('close', () => {
     if (appSocket === ws) appSocket = null;

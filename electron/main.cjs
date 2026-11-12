@@ -5,6 +5,7 @@ const path = require('path');
 const { createRemoteLink } = require('./remote/link.cjs');
 const { createRemoteControl } = require('./remote/control.cjs');
 const { createCursorHider } = require('./cursor.cjs');
+const { checkForUpdates } = require('./updates.cjs');
 
 // Unpacked uBlock Origin, downloaded by scripts/fetch-ublock.cjs (runs on npm install).
 const UBLOCK_PATH = path.join(__dirname, '..', 'extensions', 'ublock-origin');
@@ -306,6 +307,19 @@ ipcMain.handle('remote:status', async () => {
 ipcMain.handle('remote:info', async () => (await remote?.ready) ?? null);
 
 app.on('before-quit', () => remote?.close());
+
+/* ---------- Updates (gear button) ---------- */
+
+// The remote server installs updates, since it has to turn this app off first.
+// `canInstall` is false when the app was started without it, or by a server from
+// before updates existed (still running in the terminal after a manual git pull).
+ipcMain.handle('update:check', async () => ({
+  ...(await checkForUpdates()),
+  canInstall: remote?.canUpdate() ?? false,
+  lastError: remote?.updateError() ?? null,
+}));
+
+ipcMain.handle('update:install', () => remote?.requestUpdate() ?? false);
 
 /* ---------- Ad blocker ---------- */
 

@@ -51,6 +51,7 @@ electron/
   extension-shim.preload.cjs   Fixes that let uBlock Origin run in Electron
   text-focus.preload.cjs       Tells the main process when a text field on an in-app website has focus
   cursor.cjs                   Hides the computer's mouse cursor when idle (while a phone is connected)
+  updates.cjs                  Checks for and installs updates (git and uBlock Origin); see Updates
   remote/
     server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
     link.cjs                   The TV app's connection to the remote server
@@ -59,13 +60,14 @@ electron/
     public/                    The phone remote page (index.html, remote.css, remote.js)
 src/
   main.jsx, App.jsx            React entry point and root component
-  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus)
+  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus, UpdatePopup)
   hooks/useWideImage.js        React hook around utils/wideImage.js
   utils/wideImage.js           Turns square app icons into wide tiles on a canvas
   data/apps.json               The list of streaming services on the home screen
   index.css                    Tailwind setup, theme, animations
 public/                        App icons (copied as-is into dist/)
-scripts/fetch-ublock.cjs       Downloads uBlock Origin on npm install
+scripts/start.cjs              Runs the remote server and restarts it after an update (npm start / npm run dev)
+scripts/fetch-ublock.cjs       Downloads the latest uBlock Origin on npm install and on updates
 index.html, vite.config.js     Vite entry and config
 extensions/ublock-origin/      Downloaded uBlock Origin (git-ignored)
 dist/                          Vite build output (git-ignored)
@@ -78,7 +80,8 @@ All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "mod
 
 | What | Created in | Runs | Has Node access? |
 |---|---|---|---|
-| Remote server | `npm start` / `npm run dev` | `electron/remote/server.cjs` (plain Node) | Yes |
+| Launcher | `npm start` / `npm run dev` | `scripts/start.cjs` (plain Node) | Yes |
+| Remote server | The launcher | `electron/remote/server.cjs` (plain Node) | Yes |
 | Main process | The remote server (`startTv()`) | `electron/main.cjs` and everything it requires | Yes |
 | Home screen renderer | `createWindow()` | The React app (`dist/index.html` or the Vite dev server) | No; only `window.tv` from `preload.cjs` |
 | In-app website | `createInAppController().open()` | Any streaming site | No; sandboxed, only `text-focus.preload.cjs` (exposes nothing) |
@@ -88,7 +91,7 @@ All Electron code is CommonJS (`.cjs`) because `package.json` sets `"type": "mod
 
 ## Startup sequence
 
-`npm start` (after building) and `npm run dev` (once Vite is up) run `node electron/remote/server.cjs`. The remote server listens on port 8765, prints the phone link, and starts Electron (`startTv()`). See [Remote server](#remote-server-servercjs).
+`npm start` and `npm run dev` (once Vite is up) run the launcher, [scripts/start.cjs](scripts/start.cjs). For `npm start` (`--build`) it builds the home screen first. Then it runs `node electron/remote/server.cjs`, and runs it again whenever the server exits with code 75 (after installing an update; see [Updates](#updates)), rebuilding first for `npm start`. Any other exit, or Ctrl+C, ends the launcher too. The remote server listens on port 8765, prints the phone link, and starts Electron (`startTv()`). See [Remote server](#remote-server-servercjs).
 
 Then `app.whenReady()` in [main.cjs](electron/main.cjs):
 
@@ -156,6 +159,8 @@ The window's `webContents.id` maps to its controller in `controllers`, so IPC me
 | `getRemoteInfo()` | `remote:info` (invoke) | renderer → main | `{ url, qr, lanAvailable }` for the QR popup, or `null` if the remote server can't be reached |
 | `getRemoteStatus()` | `remote:status` (invoke) | renderer → main | `{ available, connected }` |
 | `onRemoteStatus(cb)` | `remote:status` | main → renderer | Sent when a phone connects or disconnects |
+| `checkForUpdates()` | `update:check` (invoke) | renderer → main | `{ app, ublock, canInstall, lastError }`; see [Updates](#updates) |
+| `installUpdates()` | `update:install` (invoke) | renderer → main | Asks the remote server to update; `false` if it can't be reached |
 
 The `on…` methods return an unsubscribe function, which the React effects return as cleanup.
 
@@ -175,7 +180,7 @@ Components:
 
 | Component | What it does |
 |---|---|
-| [TopBar](src/components/TopBar.jsx) | Drag region. While a site is open, shows browser-style icon buttons (Home, Back, Forward, and Reload, which becomes Stop while loading; same icons as the phone remote) and the app name. Back is never disabled, because on the first page it goes home; Forward is disabled when there's nothing to go forward to. Also shows the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock. |
+| [TopBar](src/components/TopBar.jsx) | Drag region. While a site is open, shows browser-style icon buttons (Home, Back, Forward, and Reload, which becomes Stop while loading; same icons as the phone remote) and the app name. Back is never disabled, because on the first page it goes home; Forward is disabled when there's nothing to go forward to. Also shows the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock; and the gear button that opens `UpdatePopup` (home screen only, for the same reason). |
 | [Hero](src/components/Hero.jsx) | Large title and tagline of the focused app. Keyed on the title so the entrance animation replays. |
 | [CardGrid](src/components/CardGrid.jsx) | 4 columns (6 on `xl`). Arrow keys move focus; the column count is read from the computed grid, so it follows the breakpoint. Keeps real DOM focus on the focused card so Enter/Space click it. Disabled while the QR popup is open. |
 | [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
@@ -183,6 +188,7 @@ Components:
 | [Clock](src/components/Clock.jsx) | Day, date and time, like "Sun Nov 8 2:48 PM" (in the system's language and 12/24-hour setting), updated every second. |
 | [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the link, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
 | [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
+| [UpdatePopup](src/components/UpdatePopup.jsx) | Checks for updates when opened. Shows "Up to date", or what's new (the first 5 commit messages and the uBlock Origin version) with "Update and restart", or why the check failed. Also shows why the last update failed, if it did. |
 
 **Wide tiles.** App icons in `public/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
 
@@ -215,7 +221,8 @@ A plain Node program, separate from Electron, that runs until it's stopped in th
 - **WebSockets.** `ws` with a 64 KB message limit, on two paths:
   - `/ws` for phones. Open to anyone who can reach the port.
   - `/app` for the TV app. Only accepted from loopback with the right key (`?k=`, a random key made each time the server starts and passed to Electron in `TV_REMOTE_LINK`; compared in constant time), so a phone can't pose as the app. Only one app connection at a time.
-- **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping is ignored. If the app exits any other way (Cmd+Q, closing the window, a crash), the state becomes `off`.
+- **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping or updating is ignored. If the app exits any other way (Cmd+Q, closing the window, a crash), the state becomes `off`.
+- **Updates** (`updateAndRestart()`), when the TV app sends `update`: see [Updates](#updates).
 - **Stopping the server.** `SIGINT`/`SIGTERM` closes every connection, stops the TV app and exits once it's gone (or after 5 seconds).
 - **Commands.** Phone messages are JSON with a string `t` field; anything else is ignored. `power` is handled by the server; everything else is forwarded to the TV app, or dropped while it's off.
 
@@ -229,13 +236,13 @@ Server → app:
 
 | Message | Meaning |
 |---|---|
-| `{ t: 'hello', url, qr, lanAvailable, connected }` | Sent on connect: the phone link, its QR code (PNG data URL), and whether a phone is already connected |
+| `{ t: 'hello', url, qr, lanAvailable, connected, updates, updateError }` | Sent on connect: the phone link, its QR code (PNG data URL), whether a phone is already connected, that the server can install updates (`updates: true`), and why the last update failed (or `null`) |
 | `{ t: 'status', connected }` | A phone connected or left |
 | `{ t: 'phone-connected' }` | A phone connected (or one was already connected when the app connected); the app replies with its volume state |
 | `{ t: 'command', msg }` | A phone command (see below) |
 | `{ t: 'quit' }` | Power was pressed; the app calls `app.quit()` |
 
-App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state` and `keyboard`).
+App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state` and `keyboard`). `{ t: 'update' }` asks the server to install updates (the gear popup's "Update and restart").
 
 ### Message protocol
 
@@ -258,7 +265,7 @@ Computer → phone:
 | Message | Meaning |
 |---|---|
 | `{ t: 'state', volume, muted }` | Current volume. Sent when a phone connects, when the TV app starts with a phone connected, and when the volume changes. Sent by the TV app, through the server. |
-| `{ t: 'tv', state }` | The TV app is `off`, `starting`, `on` or `stopping`. Sent by the server when a phone connects and whenever it changes. |
+| `{ t: 'tv', state }` | The TV app is `off`, `starting`, `on`, `stopping` or `updating`. Sent by the server when a phone connects and whenever it changes. |
 | `{ t: 'textHover', over }` | Whether the pointer is over a text field on the open website. Sent when it changes and when a phone connects. Sent by the TV app, through the server. |
 | `{ t: 'keyboard', open }` | A text field on the open website got focus (`true`, sent again for each new field) or lost it (`false`). Sent by the TV app, through the server. |
 
@@ -271,7 +278,7 @@ The remote server handles `power` itself. Everything else reaches `main.cjs` as 
 - **Connection.** Connects to `/ws`. On disconnect it retries every 1.5 seconds, forever; after 3 failures it says it can't reach the TV (the remote server was stopped, or the phone left the Wi‑Fi). It reconnects when the page becomes visible again (phones suspend background tabs).
 - **Trackpad.** Pointer events with pointer capture. One finger moves the pointer, with acceleration (`gain = 1.6 + min(speed / 6, 2.6)`): slow moves are precise, fast swipes go far. Two or more fingers scroll. Moves and scrolls are added up and sent once per animation frame. A tap (one finger, under 12 px of travel, under 300 ms) sends a click.
 - **Buttons.** `data-nav` buttons send `nav`, `data-key` buttons send `key`. Power asks for confirmation, then sends `power`.
-- **Off screen.** While the TV app is `off`, `starting` or `stopping` (from `tv` messages), a full-screen overlay covers the remote, with a large power button that turns the TV on (enabled only when `off`). The connection status stays visible above it.
+- **Off screen.** While the TV app is `off`, `starting`, `stopping` or `updating` (from `tv` messages), a full-screen overlay covers the remote, with a large power button that turns the TV on (enabled only when `off`). The connection status stays visible above it.
 - **Volume.** The slider sends at most every 60 ms while dragging, and once more on release. Incoming `state` messages don't move the slider while the user is dragging it.
 - **Typing.** A text box in a bottom sheet. On each change it compares the new text with what was sent so far and sends only the difference: backspaces for removed characters, then the added text. That way autocorrect and predictive text (which replace whole words) work. Backspace on an empty box deletes text on the TV. The Delete and Enter buttons cancel `pointerdown` so the phone keyboard stays open. Enter (the button or the keyboard's Go) sends Enter to the TV and closes the sheet. Phones only show their keyboard for a `focus()` inside a tap, and `keyboard` arrives too late for that, so:
   - A trackpad tap while `textHover` says the pointer is over a text field opens the sheet and focuses the box during the tap itself (in `pointerup`, and again in `touchend` for iPhones), so the keyboard is up right away. The `keyboard: true` that follows is the confirmation; if none arrives within 2.5 seconds (the tap missed) and nothing was typed, the sheet closes.
@@ -326,7 +333,7 @@ It only affects the app's own pages; the cursor still shows over other apps and 
 
 ## Ad blocking (uBlock Origin)
 
-**Download.** [fetch-ublock.cjs](scripts/fetch-ublock.cjs) runs on `npm install` (`postinstall`). It downloads the official uBlock Origin Chromium build (version pinned in `VERSION`) from GitHub releases, unzips it (with `unzip`, or `tar` where there's no `unzip`) into `extensions/ublock-origin/`, and skips the download if that version is already there. A failed download prints a warning instead of failing `npm install`; the app then runs without the ad blocker. `npm run fetch:ublock` forces a fresh download.
+**Download.** [fetch-ublock.cjs](scripts/fetch-ublock.cjs) runs on `npm install` (`postinstall`). It also runs when the app updates. It asks GitHub's API for the latest stable uBlock Origin release and downloads its official Chromium build. If GitHub can't be asked, it keeps the installed version, or installs `FALLBACK_VERSION` if there is none. It unzips it (with `unzip`, or `tar` where there's no `unzip`) into `extensions/ublock-origin/`, skipping the download if the latest version is already there. A failed download prints a warning instead of failing `npm install`; the app then runs without the ad blocker. `npm run fetch:ublock` forces a fresh download.
 
 **Loading** (`loadAdBlocker()` in `main.cjs`). Electron only supports part of the Chrome extension APIs, so the [`electron-chrome-extensions`](https://github.com/samuelmaddock/electron-browser-shell/tree/master/packages/electron-chrome-extensions) library adds the rest (`browserAction`, `tabs`, `webNavigation`, …) to the default session. Each in-app site is registered as a tab (`addTab`, `selectTab`), so uBO knows which page a request belongs to.
 
@@ -342,14 +349,33 @@ Most streaming services encrypt video with Google's Widevine DRM. Stock Electron
 - `loadWidevine()` waits for `components.whenReady()`, which downloads or updates the Widevine module on first launch, then logs `Widevine ready`. On stock Electron, `components` is undefined and it logs `Widevine unavailable`.
 - **VMP signing.** Widevine has security levels. castLabs' builds are signed for development only, and services like Prime Video and Netflix reject that ("You are running an old or unsupported version of this browser"). castLabs' free EVS service signs the Electron app for production (Verified Media Path). The `evs:*` and `sign:vmp` scripts install castLabs' Python tool into `.venv-evs/` and sign `node_modules/electron/dist`. That folder only exists after the first launch, and reinstalling Electron replaces it, so signing happens after the first launch and again after every reinstall.
 
+## Updates
+
+The gear button on the home screen opens [UpdatePopup](src/components/UpdatePopup.jsx), which calls `checkForUpdates()` in [updates.cjs](electron/updates.cjs) through `update:check`. The check runs in the TV app's main process:
+
+- **App.** `git fetch`, then `git log HEAD..@{u}` lists the commits on GitHub that this copy doesn't have (`{ behind, commits }`). If git fails, the result is `{ error }` with a plain-language reason (`explainGitError()`): git not installed, not a git clone, no upstream branch, local changes in the way, local commits, or no network. Git never prompts for a password (`GIT_TERMINAL_PROMPT=0`), and the fetch gives up after 30 seconds.
+- **uBlock Origin.** The installed version (its `manifest.json`) against the latest release on GitHub (`{ installed, latest, available }`), or `null` if GitHub can't be asked.
+
+"Update and restart" sends `update` to the remote server, which runs `updateAndRestart()` in [server.cjs](electron/remote/server.cjs):
+
+1. Turns the TV app off (`stopTv()`) and sets the state to `updating`, so the phones show "Updating…" and Power is ignored.
+2. Runs `applyUpdates()` from updates.cjs: if there are new commits, `git pull --ff-only` and then `npm install` (whose `postinstall` updates uBlock Origin); then `fetch-ublock.cjs`, which does nothing if uBlock Origin is already the latest. Their output goes to the terminal.
+3. Exits with code 75. The launcher rebuilds (for `npm start`) and starts the new server, which turns the TV app on as usual. Phones reconnect by themselves.
+
+`canInstall` is true only if the server said `updates: true` in `hello`. A server started before this feature existed doesn't, and would ignore `update`. That happens when the code is pulled by hand and only Power is used to restart, since Power restarts the TV app but not the server. The popup then asks for the terminal command to be restarted. If the app is still running 20 seconds after "Update and restart", the popup says the update didn't start.
+
+If a step fails, the server turns the TV app back on without restarting and keeps the reason in `updateError`, which goes to the app in `hello` and shows in the popup. If the server wasn't started by the launcher (`TV_SUPERVISED` unset), it turns the TV app back on after updating, and says in the terminal that it needs restarting by hand.
+
+In `npm run dev`, Vite keeps running through the update and reloads the changed React code itself.
+
 ## Build and scripts
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | Starts Vite on port 5173 (`strictPort`) and, once it's up (`wait-on`), the remote server with `VITE_DEV_SERVER_URL` set, which starts Electron. React changes hot-reload. Changes in `electron/` need the TV turned off and on (Power), except `server.cjs`, which needs `npm run dev` restarted. Power leaves Vite and the server running; `concurrently -k` stops both when either exits (Ctrl+C). |
+| `npm run dev` | Starts Vite on port 5173 (`strictPort`) and, once it's up (`wait-on`), the launcher (and so the remote server) with `VITE_DEV_SERVER_URL` set, which starts Electron. React changes hot-reload. Changes in `electron/` need the TV turned off and on (Power), except `server.cjs`, which needs `npm run dev` restarted. Power leaves Vite and the server running; `concurrently -k` stops both when either exits (Ctrl+C). |
 | `npm run build` | Builds the React app into `dist/`. |
-| `npm start` | Builds, then starts the remote server, which runs Electron on `dist/`. |
-| `npm run fetch:ublock` | Re-downloads uBlock Origin. |
+| `npm start` | Runs the launcher with `--build`: builds, then starts the remote server, which runs Electron on `dist/`. |
+| `npm run fetch:ublock` | Re-downloads the latest uBlock Origin. |
 | `npm run evs:setup` | Creates `.venv-evs` and installs castLabs' `castlabs-evs` tool. |
 | `npm run evs:signup` | Creates a castLabs EVS account (one time). |
 | `npm run sign:vmp` | Signs `node_modules/electron/dist` for production Widevine. |
@@ -368,5 +394,5 @@ There's no packaging step (no installer or `.app` bundle); the app runs from the
 
 - `TOP_BAR_HEIGHT` in [main.cjs](electron/main.cjs) and the top bar's height (`h-14`, 56 px) in [TopBar.jsx](src/components/TopBar.jsx). The remote control also uses it to decide whether a click goes to the top bar or the site.
 - The Electron version in `package.json` and the castLabs release tag (`v45.2.1+wvcus`). After changing it, run `npm run sign:vmp` again.
-- `VERSION` in [fetch-ublock.cjs](scripts/fetch-ublock.cjs) when updating uBlock Origin, then run `npm run fetch:ublock`.
+- `RESTART_CODE` (75) in [server.cjs](electron/remote/server.cjs) and [start.cjs](scripts/start.cjs).
 - New remote commands: add the message to the phone page ([remote.js](electron/remote/public/remote.js)), handle it in `handle()` in [control.cjs](electron/remote/control.cjs) (or in the phone connection handler in [server.cjs](electron/remote/server.cjs) for ones that must work while the TV app is off, like `power`), and validate and clamp its fields there.

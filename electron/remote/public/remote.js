@@ -9,7 +9,7 @@
   let ws = null;
   let retryTimer = null;
   let failedAttempts = 0;
-  let tvState = null; // 'off' | 'starting' | 'on' | 'stopping', from the server
+  let tvState = null; // 'off' | 'starting' | 'on' | 'stopping' | 'updating', from the server
 
   const setStatus = (state, text) => {
     status.dataset.state = state;
@@ -62,6 +62,7 @@
     off: ['TV is off', 'Tap to turn it on.'],
     starting: ['Turning on…', 'This takes a few seconds.'],
     stopping: ['Turning off…', ''],
+    updating: ['Updating…', 'The TV turns back on by itself when it’s done.'],
   };
 
   function applyTvState(state) {
