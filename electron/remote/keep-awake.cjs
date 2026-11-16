@@ -1,8 +1,9 @@
 // Keeps the computer from going to sleep on its own while the remote server runs,
 // so a phone can always turn the TV on. Plain Node has no power API, so this
 // starts the system's own tool, which watches this process and stops blocking
-// sleep when it exits (even if it's killed). The screen can still turn off;
-// the TV app keeps it on while it runs (powerSaveBlocker in main.cjs).
+// sleep when it exits (even if it's killed). On macOS and Linux the screen can
+// still turn off (the TV app keeps it on while it runs, via powerSaveBlocker in
+// main.cjs); on Windows it stays on too, because of Modern Standby (see below).
 const { spawn } = require('child_process');
 
 function command(pid) {
@@ -11,10 +12,14 @@ function command(pid) {
     return ['caffeinate', ['-i', '-w', String(pid)]];
   }
   if (process.platform === 'win32') {
-    // ES_CONTINUOUS | ES_SYSTEM_REQUIRED, held by this PowerShell until it exits.
+    // ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED, held by this
+    // PowerShell until it exits. The display flag matters: most current laptops
+    // use Modern Standby, which goes to sleep as soon as the screen turns off and
+    // ignores ES_SYSTEM_REQUIRED, so with the TV app off the laptop would sleep
+    // after the screen timeout and the phone could no longer turn it back on.
     const script = [
       `Add-Type -Namespace TV -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);'`,
-      `[TV.Power]::SetThreadExecutionState([uint32]2147483649) | Out-Null`,
+      `[TV.Power]::SetThreadExecutionState([uint32]2147483651) | Out-Null`,
       `Wait-Process -Id ${pid} -ErrorAction SilentlyContinue`,
     ].join('; ');
     return ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script]];

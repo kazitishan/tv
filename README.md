@@ -63,7 +63,7 @@ Click the **gear** at the top right of the TV's home screen. If there's an updat
 
 ## Keeping the laptop closed
 
-While the app is running, the computer won't go to sleep on its own, and the screen stays on while the TV is on. Closing the lid still puts it to sleep unless you do this:
+While the app is running, the computer won't go to sleep on its own, so your phone can always turn the TV back on. The screen stays on while the TV is on. On Windows the screen also stays on while the TV is off, because most Windows laptops go to sleep as soon as the screen turns off. Turn off the TV itself to hide the desktop. Closing the lid still puts the computer to sleep unless you do this:
 
 **Windows:** run this in Command Prompt:
 
