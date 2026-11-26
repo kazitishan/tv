@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import apps from './data/apps.json';
 import Backdrop from './components/Backdrop.jsx';
 import CardGrid from './components/CardGrid.jsx';
@@ -25,7 +25,8 @@ export default function App() {
   // The phone remote QR code popup. Shown only while no phone is connected: on
   // startup, and when the last phone leaves. Closes as soon as one connects.
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
-  const [showUpdates, setShowUpdates] = useState(false); // the gear button's popup
+  const [showMenu, setShowMenu] = useState(false); // the gear button's dropdown
+  const [showUpdates, setShowUpdates] = useState(false); // "Check for updates" popup
   const current = apps[focused];
 
   // Back / Forward / Refresh state of the open website, for the top bar.
@@ -71,6 +72,8 @@ export default function App() {
     };
   }, []);
 
+  const closeMenu = useCallback(() => setShowMenu(false), []);
+
   const openApp = (app) => {
     if (tv) {
       tv.openInApp(app.url);
@@ -93,6 +96,10 @@ export default function App() {
         remoteConnected={remoteConnected}
         onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
         onShowUpdates={tv?.checkForUpdates ? () => setShowUpdates(true) : null}
+        onQuit={tv?.quit ? () => tv.quit() : null}
+        menuOpen={showMenu && !openAppName}
+        onToggleMenu={() => setShowMenu((open) => !open)}
+        onCloseMenu={closeMenu}
       />
 
       <Hero title={current.name} subtitle={current.tagline} />
@@ -102,7 +109,7 @@ export default function App() {
         focusedIndex={focused}
         onFocusChange={setFocused}
         onSelect={openApp}
-        active={!showRemotePrompt && !showUpdates}
+        active={!showRemotePrompt && !showUpdates && !showMenu}
       />
 
       {showRemotePrompt && <RemotePrompt onClose={() => setShowRemotePrompt(false)} />}

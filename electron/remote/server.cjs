@@ -19,6 +19,7 @@ const { keepAwake } = require('./keep-awake.cjs');
 const PORT = Number(process.env.TV_REMOTE_PORT) || 8765;
 const ROOT = path.join(__dirname, '..', '..'); // the Electron app (package.json "main")
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const ICONS_DIR = path.join(ROOT, 'src', 'icons');
 const FILES = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/remote.css': ['remote.css', 'text/css; charset=utf-8'],
@@ -186,7 +187,19 @@ async function updateAndRestart() {
 /* ---------- HTTP + WebSocket ---------- */
 
 const server = http.createServer((req, res) => {
-  const file = FILES[new URL(req.url, 'http://localhost').pathname];
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  // Icons are shared with the home screen, in src/icons/.
+  // Only plain names match, so the path can't leave that folder.
+  const icon = pathname.match(/^\/icons\/([a-z0-9-]+)\.svg$/);
+  if (icon && req.method === 'GET') {
+    const iconPath = path.join(ICONS_DIR, `${icon[1]}.svg`);
+    if (fs.existsSync(iconPath)) {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
+      fs.createReadStream(iconPath).pipe(res);
+      return;
+    }
+  }
+  const file = FILES[pathname];
   if (!file || req.method !== 'GET') {
     res.writeHead(404).end();
     return;

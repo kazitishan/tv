@@ -1,39 +1,22 @@
+import { useRef } from 'react';
 import Clock from './Clock.jsx';
+import Icon from './Icon.jsx';
 import RemoteStatus from './RemoteStatus.jsx';
+import SettingsMenu from './SettingsMenu.jsx';
 
-// Icon paths, matching the phone remote's buttons.
-const ICONS = {
-  home: <path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" />,
-  back: <path d="M15 18l-6-6 6-6" />,
-  forward: <path d="M9 18l6-6-6-6" />,
-  refresh: (
-    <>
-      <path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5" />
-      <path d="M20 3.5v5h-5" />
-    </>
-  ),
-  stop: <path d="M6 6l12 12M18 6 6 18" />,
-  gear: (
-    <>
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-};
-
-/** A round icon button for the top bar. */
-function NavButton({ icon, label, onClick, disabled = false }) {
+/** A round icon button for the top bar (`icon` is a file in src/icons/; same icons as the phone remote). */
+function NavButton({ icon, label, onClick, disabled = false, ref, ...rest }) {
   return (
     <button
+      ref={ref}
+      {...rest}
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={label}
       className="app-no-drag grid size-9 cursor-pointer place-items-center rounded-full text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-default disabled:text-white/25 disabled:hover:bg-transparent"
     >
-      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        {ICONS[icon]}
-      </svg>
+      <Icon name={icon} />
     </button>
   );
 }
@@ -52,9 +35,16 @@ export default function TopBar({
   remoteConnected,
   onShowRemote,
   onShowUpdates,
+  onQuit,
+  menuOpen,
+  onToggleMenu,
+  onCloseMenu,
 }) {
+  const gearRef = useRef(null);
+  const showGear = (onShowUpdates || onQuit) && !openAppName;
   return (
-    <header className="app-drag relative z-1 flex h-14 shrink-0 items-center justify-between pr-14 pl-24">
+    // Raised above the card grid (also z-1, later in the page) while the menu is open.
+    <header className={`app-drag relative flex ${menuOpen ? 'z-20' : 'z-1'} h-14 shrink-0 items-center justify-between pr-14 pl-24`}>
       <div className="flex items-center gap-1">
         {openAppName && (
           <>
@@ -87,15 +77,31 @@ export default function TopBar({
             title="Connect phone remote"
             className="app-no-drag grid size-9 cursor-pointer place-items-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           >
-            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
-              <path d="M11 18h2" />
-            </svg>
+            <Icon name="phone" />
           </button>
         )}
         <Clock />
-        {/* Update check (home screen only, like the phone button). */}
-        {onShowUpdates && !openAppName && <NavButton icon="gear" label="Check for updates" onClick={onShowUpdates} />}
+        {/* Settings menu: update check and Quit (home screen only, like the phone button). */}
+        {showGear && (
+          <div className="relative">
+            <NavButton
+              ref={gearRef}
+              icon="gear"
+              label="Settings"
+              onClick={onToggleMenu}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            />
+            {menuOpen && (
+              <SettingsMenu
+                anchorRef={gearRef}
+                onClose={onCloseMenu}
+                onCheckForUpdates={onShowUpdates}
+                onQuit={onQuit}
+              />
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

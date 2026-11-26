@@ -180,6 +180,9 @@ const controllers = new Map(); // renderer webContents id -> in-app controller
 ipcMain.on('in-app:open', (event, url) => controllers.get(event.sender.id)?.open(url));
 ipcMain.on('in-app:close', (event) => controllers.get(event.sender.id)?.close());
 ipcMain.on('in-app:navigate', (event, action) => controllers.get(event.sender.id)?.navigate(action));
+// The gear menu's Quit: same as the phone's Power. The remote server keeps
+// running, sees the TV as off, and Power on the phone turns it back on.
+ipcMain.on('app:quit', () => app.quit());
 
 function createWindow() {
   const win = new BrowserWindow({

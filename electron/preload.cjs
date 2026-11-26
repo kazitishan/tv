@@ -34,4 +34,7 @@ contextBridge.exposeInMainWorld('tv', {
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   // Turns the TV off, updates and turns it back on. Resolves to false if it can't.
   installUpdates: () => ipcRenderer.invoke('update:install'),
+
+  // Turns the TV app off (the gear menu's Quit), like the phone's Power button.
+  quit: () => ipcRenderer.send('app:quit'),
 });

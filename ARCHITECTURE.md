@@ -61,12 +61,13 @@ electron/
     public/                    The phone remote page (index.html, remote.css, remote.js)
 src/
   main.jsx, App.jsx            React entry point and root component
-  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus, UpdatePopup)
+  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus, SettingsMenu, UpdatePopup, Icon)
+  icons/                       Every UI icon as an SVG (home screen, phone remote and pointer); see Icons
   hooks/useWideImage.js        React hook around utils/wideImage.js
   utils/wideImage.js           Turns square app icons into wide tiles on a canvas
   data/apps.json               The list of streaming services on the home screen
   index.css                    Tailwind setup, theme, animations
-public/                        App icons (copied as-is into dist/)
+public/logos/                  Streaming service logos (copied as-is into dist/)
 scripts/start.cjs              Runs the remote server and restarts it after an update (npm start / npm run dev)
 scripts/fetch-ublock.cjs       Downloads the latest uBlock Origin on npm install and on updates
 index.html, vite.config.js     Vite entry and config
@@ -162,6 +163,7 @@ The window's `webContents.id` maps to its controller in `controllers`, so IPC me
 | `onRemoteStatus(cb)` | `remote:status` | main → renderer | Sent when a phone connects or disconnects |
 | `checkForUpdates()` | `update:check` (invoke) | renderer → main | `{ app, ublock, canInstall, lastError }`; see [Updates](#updates) |
 | `installUpdates()` | `update:install` (invoke) | renderer → main | Asks the remote server to update; `false` if it can't be reached |
+| `quit()` | `app:quit` | renderer → main | Quits the TV app (the gear menu's Quit), like Power on the phone; the remote server keeps running |
 
 The `on…` methods return an unsubscribe function, which the React effects return as cleanup.
 
@@ -175,13 +177,14 @@ If `window.tv` is missing (the React app opened in a plain browser tab with `npx
 - `openAppName`: name of the open site, shown in the top bar (null on the home screen).
 - `navState`: `{ canGoBack, canGoForward, loading }` of the open site, from `in-app:nav-state`. Starts as loading when a site opens, and resets when it closes.
 - `remoteConnected`: whether a phone is connected (green dot in the top bar).
+- `showMenu`: the gear button's dropdown. The card grid ignores arrow keys while it's open.
 - `showRemotePrompt`: the QR popup. It is shown only while no phone is connected: on startup if none is (so not when a phone turned the TV on, or on the remote's Refresh), and 3 seconds after the last phone disconnects (`RECONNECT_GRACE_MS`, so a phone that drops for a moment doesn't flash it). It closes as soon as a phone connects. "Continue without connecting controller" closes it until the next time a phone connects and leaves.
 
 Components:
 
 | Component | What it does |
 |---|---|
-| [TopBar](src/components/TopBar.jsx) | Drag region. While a site is open, shows browser-style icon buttons (Home, Back, Forward, and Reload, which becomes Stop while loading; same icons as the phone remote) and the app name. Back is never disabled, because on the first page it goes home; Forward is disabled when there's nothing to go forward to. Also shows the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock; and the gear button that opens `UpdatePopup` (home screen only, for the same reason). |
+| [TopBar](src/components/TopBar.jsx) | Drag region. While a site is open, shows browser-style icon buttons (Home, Back, Forward, and Reload, which becomes Stop while loading; same icons as the phone remote) and the app name. Back is never disabled, because on the first page it goes home; Forward is disabled when there's nothing to go forward to. Also shows the green dot (`RemoteStatus`) or a phone button that reopens the QR popup (home screen only, since a site would cover the popup); the clock; and the gear button that opens `SettingsMenu` (home screen only, for the same reason). |
 | [Hero](src/components/Hero.jsx) | Large title and tagline of the focused app. Keyed on the title so the entrance animation replays. |
 | [CardGrid](src/components/CardGrid.jsx) | 4 columns (6 on `xl`). Arrow keys move focus; the column count is read from the computed grid, so it follows the breakpoint. Keeps real DOM focus on the focused card so Enter/Space click it. Disabled while the QR popup is open. |
 | [Card](src/components/Card.jsx) | A tile that zooms, tilts and shows glare toward the mouse (CSS variables `--rx`, `--ry`, `--gx`, `--gy`), with a press animation on select. |
@@ -189,20 +192,30 @@ Components:
 | [Clock](src/components/Clock.jsx) | Day, date and time, like "Sun Nov 8 2:48 PM" (in the system's language and 12/24-hour setting), updated every second. |
 | [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the link, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
 | [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
+| [SettingsMenu](src/components/SettingsMenu.jsx) | The gear button's dropdown: "Check for updates" (opens `UpdatePopup`) and "Quit" (with a power icon; calls `window.tv.quit()`). Up/Down move between items; Esc, a click outside or picking an item closes it. The top bar is raised above the card grid while it's open. |
 | [UpdatePopup](src/components/UpdatePopup.jsx) | Checks for updates when opened. Shows "Up to date", or what's new (the first 5 commit messages and the uBlock Origin version) with "Update and restart", or why the check failed. Also shows why the last update failed, if it did. |
 
-**Wide tiles.** App icons in `public/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
+**Wide tiles.** Logos in `public/logos/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
 
 **Styling.** Tailwind 4 through `@tailwindcss/vite`. [index.css](src/index.css) defines the font stack, the `ease-tv` easing, the `rise`/`fade`/`press` animations and the `app-drag`/`app-no-drag` utilities.
 
+### Icons
+
+Every icon in the app is an SVG file in [src/icons/](src/icons/), shared by the home screen, the phone remote and the pointer overlay. Most are drawn with `stroke="currentColor"` (or `fill="currentColor"`), so they take the colour of the text around them, including hover and disabled states. That only works when the SVG is part of the page, not loaded with `<img>`, so:
+
+- **Home screen.** [Icon.jsx](src/components/Icon.jsx) inlines every file at build time (`import.meta.glob` with `?raw`). `<Icon name="power" className="size-5" />` uses `src/icons/power.svg`.
+- **Phone remote.** The page has `<i data-icon="name">` placeholders. [remote.js](electron/remote/public/remote.js) fetches `/icons/<name>.svg` from the remote server and puts the SVG in place of each placeholder, keeping the placeholder's classes (like `filled`), so [remote.css](electron/remote/public/remote.css) can size and colour it.
+
+To add an icon, put a 24×24 `viewBox` SVG in `src/icons/` and use it by its file name.
+
 ### Adding a streaming service
 
-Add an entry to [src/data/apps.json](src/data/apps.json) and put its icon (square PNG) in `public/`:
+Add an entry to [src/data/apps.json](src/data/apps.json) and put its logo (square PNG) in `public/logos/`:
 
 ```json
 {
   "name": "Example",
-  "img": "example.png",
+  "img": "logos/example.png",
   "url": "https://www.example.com",
   "tagline": "Short description",
   "bg": "#000"
@@ -218,11 +231,11 @@ Add an entry to [src/data/apps.json](src/data/apps.json) and put its icon (squar
 A plain Node program, separate from Electron, that runs until it's stopped in the terminal (Ctrl+C, or `concurrently -k` stopping it in `npm run dev`). Keeping it outside the TV app is what lets the Power button turn the app off and back on, with phones staying connected the whole time.
 
 - **Address.** Listens on `0.0.0.0:8765` (or `TV_REMOTE_PORT`). If the port is taken, it exits with an error instead of picking another port, because the phone link must stay the same, and the port being taken usually means another copy is already running. The link uses the computer's LAN IPv4 address, preferring Wi‑Fi/Ethernet adapters (`en*`, `eth*`, `wl*`) over VPN and virtual ones, and skipping link-local `169.254.*`. With no network, it falls back to `localhost` and `lanAvailable: false`, which the QR popup warns about. The link is `http://<lan-ip>:8765/`, with no token, so it stays the same across restarts.
-- **Static files.** Only `/`, `/remote.css` and `/remote.js` are served (from `public/`), with `Cache-Control: no-store` so phones always get the current version. Anything else is 404.
+- **Static files.** Only `/`, `/remote.css` and `/remote.js` (from `electron/remote/public/`) and `/icons/<name>.svg` (from the project's `src/icons/`; the name must be lowercase letters, digits and dashes) are served, with `Cache-Control: no-store` so phones always get the current version. Anything else is 404.
 - **WebSockets.** `ws` with a 64 KB message limit, on two paths:
   - `/ws` for phones. Open to anyone who can reach the port.
   - `/app` for the TV app. Only accepted from loopback with the right key (`?k=`, a random key made each time the server starts and passed to Electron in `TV_REMOTE_LINK`; compared in constant time), so a phone can't pose as the app. Only one app connection at a time.
-- **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping or updating is ignored. If the app exits any other way (Cmd+Q, closing the window, a crash), the state becomes `off`.
+- **Power** (`togglePower()`). The TV app's state is `off`, `starting` (process started, not yet connected back), `on` or `stopping`, and every change is sent to the phones. Power when off starts Electron (`startTv()`: spawns the binary from `require('electron')` on the project folder, inheriting the terminal and environment, so `VITE_DEV_SERVER_URL` carries through in dev). Power when starting or on stops it (`stopTv()`: sends `quit` to the app, or `SIGTERM` if it hasn't connected yet, then `SIGKILL` after 10 seconds). Power while stopping or updating is ignored. If the app exits any other way (the gear menu's Quit, Cmd+Q, closing the window, a crash), the state becomes `off`.
 - **Updates** (`updateAndRestart()`), when the TV app sends `update`: see [Updates](#updates).
 - **Keeping the computer awake** ([keep-awake.cjs](electron/remote/keep-awake.cjs)). Once listening, the server starts the system's own sleep blocker, which watches the server's PID and stops when it exits (even on `SIGKILL`): `caffeinate -i -w` on macOS, a hidden PowerShell holding `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)` until `Wait-Process` returns on Windows, and `systemd-inhibit --what=idle:sleep` on Linux. On macOS and Linux it only stops idle *system* sleep, so a phone can turn the TV on at any time; the screen can still turn off. On Windows it keeps the screen on as well, because Modern Standby laptops (most current ones) go to sleep as soon as the screen turns off, whatever `ES_SYSTEM_REQUIRED` says. While the TV app runs, `powerSaveBlocker.start('prevent-display-sleep')` in `main.cjs` keeps the screen on too. Neither stops sleep from closing a laptop's lid (see the README).
 - **Stopping the server.** `SIGINT`/`SIGTERM` closes every connection, stops the TV app and exits once it's gone (or after 5 seconds).
@@ -298,7 +311,7 @@ The remote server handles `power` itself. Everything else reaches `main.cjs` as 
 
 Clicks focus the target first, then send `mouseDown` + `mouseUp`. Scrolls send `mouseWheel`.
 
-**Pointer overlay.** Because the real cursor doesn't move, the pointer is drawn separately: a transparent, frameless, click-through (`setIgnoreMouseEvents(true)`), non-focusable child window over the main window's content area, kept in place on move/resize/fullscreen. [pointer.html](electron/remote/pointer.html) draws an arrow, positioned so its tip is exactly at the pointer, shrinks it briefly on click, and fades it out after 3 seconds without movement. It is created the first time the pointer is used.
+**Pointer overlay.** Because the real cursor doesn't move, the pointer is drawn separately: a transparent, frameless, click-through (`setIgnoreMouseEvents(true)`), non-focusable child window over the main window's content area, kept in place on move/resize/fullscreen. [pointer.html](electron/remote/pointer.html) draws an arrow (`src/icons/pointer.svg`, loaded with an `<img>` since it has its own colours), positioned so its tip is exactly at the pointer, shrinks it briefly on click, and fades it out after 3 seconds without movement. It is created the first time the pointer is used.
 
 **Keys and text** go to the open site, or the home screen if none is open. The home screen's arrow keys move between cards; on sites, Left/Right/Space are the usual video player shortcuts, and the phone's Full screen and Exit full screen buttons press F and Esc. Text is sent as `char` events through the same input queue as key presses, so a Backspace followed by new text arrives in order.
 
@@ -353,7 +366,7 @@ Most streaming services encrypt video with Google's Widevine DRM. Stock Electron
 
 ## Updates
 
-The gear button on the home screen opens [UpdatePopup](src/components/UpdatePopup.jsx), which calls `checkForUpdates()` in [updates.cjs](electron/updates.cjs) through `update:check`. The check runs in the TV app's main process:
+"Check for updates" in the gear menu on the home screen opens [UpdatePopup](src/components/UpdatePopup.jsx), which calls `checkForUpdates()` in [updates.cjs](electron/updates.cjs) through `update:check`. The check runs in the TV app's main process:
 
 - **App.** `git fetch`, then `git log HEAD..@{u}` lists the commits on GitHub that this copy doesn't have (`{ behind, commits }`). If git fails, the result is `{ error }` with a plain-language reason (`explainGitError()`): git not installed, not a git clone, no upstream branch, local changes in the way, local commits, or no network. Git never prompts for a password (`GIT_TERMINAL_PROMPT=0`), and the fetch gives up after 30 seconds.
 - **uBlock Origin.** The installed version (its `manifest.json`) against the latest release on GitHub (`{ installed, latest, available }`), or `null` if GitHub can't be asked.

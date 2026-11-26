@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import Icon from './Icon.jsx';
 
 // The update turns this app off within seconds; if it's still here, it didn't start.
 const INSTALL_TIMEOUT_MS = 20_000;
@@ -17,9 +18,7 @@ function Spinner() {
 function Check() {
   return (
     <span aria-hidden className="grid size-14 place-items-center rounded-full bg-green-400/15 text-green-400">
-      <svg viewBox="0 0 24 24" className="size-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 12.5 10 17.5 19 7" />
-      </svg>
+      <Icon name="check" className="size-7" />
     </span>
   );
 }

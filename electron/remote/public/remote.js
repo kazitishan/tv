@@ -2,6 +2,29 @@
   const $ = (selector) => document.querySelector(selector);
   const haptic = () => navigator.vibrate?.(8);
 
+  /* ---------- Icons ---------- */
+
+  // Each <i data-icon="name"> becomes the SVG from the shared src/icons/
+  // folder (served at /icons/), inlined so remote.css can colour and size it.
+  // Its classes (like "filled") carry over to the <svg>.
+  const iconFiles = new Map();
+  for (const placeholder of document.querySelectorAll('i[data-icon]')) {
+    const name = placeholder.dataset.icon;
+    if (!iconFiles.has(name)) {
+      iconFiles.set(name, fetch(`/icons/${name}.svg`).then((res) => (res.ok ? res.text() : Promise.reject())));
+    }
+    iconFiles
+      .get(name)
+      .then((text) => {
+        const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+        if (svg.nodeName !== 'svg') return;
+        svg.setAttribute('aria-hidden', 'true');
+        if (placeholder.className) svg.setAttribute('class', placeholder.className);
+        placeholder.replaceWith(document.importNode(svg, true));
+      })
+      .catch(() => {}); // the button still has its label
+  }
+
   /* ---------- Connection ---------- */
 
   const status = $('#status');

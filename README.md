@@ -54,7 +54,7 @@ If DRM video stops working after an update, run `npm run sign:vmp` again.
 
 ## Updating
 
-Click the **gear** at the top right of the TV's home screen. If there's an update, click **Update and restart**. This will pull the latest changes from this repo and update the ad-blocker.
+Click the **gear** at the top right of the TV's home screen and choose **Check for updates**. If there's an update, click **Update and restart**. This will pull the latest changes from this repo and update the ad-blocker.
 
 ## Volume on a TV
 
