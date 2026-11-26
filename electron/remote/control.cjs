@@ -118,8 +118,15 @@ function scalePageVolume(level) {
 function createPointerOverlay(win) {
   let overlay = null;
 
+  // Keeps the overlay exactly over the main window's content, so the arrow is
+  // drawn at the same spot the pages get the mouse events.
   const sync = () => {
-    if (overlay && !overlay.isDestroyed() && !win.isDestroyed()) overlay.setBounds(win.getContentBounds());
+    if (!overlay || overlay.isDestroyed() || win.isDestroyed()) return;
+    const want = win.getContentBounds();
+    const have = overlay.getBounds();
+    if (want.x !== have.x || want.y !== have.y || want.width !== have.width || want.height !== have.height) {
+      overlay.setBounds(want);
+    }
   };
 
   const ensure = () => {
@@ -138,7 +145,11 @@ function createPointerOverlay(win) {
       maximizable: false,
       fullscreenable: false,
       show: false,
-      webPreferences: { sandbox: true, contextIsolation: true },
+      // The overlay is never focused, so Chromium would treat it as in the
+      // background and stop repainting it until the app is brought to the front
+      // (by a click). The arrow then stayed where it was while the pages already
+      // saw the pointer somewhere else.
+      webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false },
     });
     overlay.setIgnoreMouseEvents(true);
     overlay.loadFile(path.join(__dirname, 'pointer.html'));
@@ -153,7 +164,11 @@ function createPointerOverlay(win) {
 
   const call = (js) => {
     const o = ensure();
-    if (!o.webContents.isLoading()) o.webContents.executeJavaScript(js).catch(() => {});
+    if (o.webContents.isLoading()) return;
+    // Window events can miss a change (like the end of a fullscreen
+    // animation), so check the overlay's position on every update too.
+    sync();
+    o.webContents.executeJavaScript(js).catch(() => {});
   };
 
   return {
