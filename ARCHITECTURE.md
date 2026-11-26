@@ -50,7 +50,7 @@ electron/
   preload.cjs                  Exposes window.tv to the React app
   extension-shim.preload.cjs   Fixes that let uBlock Origin run in Electron
   text-focus.preload.cjs       Tells the main process when a text field on an in-app website has focus
-  cursor.cjs                   Hides the computer's mouse cursor when idle (while a phone is connected)
+  cursor.cjs                   Hides the computer's mouse cursor while a phone is connected (until the mouse moves)
   updates.cjs                  Checks for and installs updates (git and uBlock Origin); see Updates
   remote/
     server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
@@ -337,7 +337,7 @@ Switching from app mode back to system mode (for example, unplugging the TV) set
 
 ## Cursor hider ([cursor.cjs](electron/cursor.cjs))
 
-While at least one phone is connected, the computer's own mouse cursor hides after 5 seconds without moving, so it doesn't sit on top of a video.
+While at least one phone is connected, the computer's own mouse cursor is hidden so it doesn't sit on top of a video. It hides as soon as a phone connects (or the TV app opens with one already connected), shows again when the real mouse moves, and hides again after 5 seconds without moving.
 
 - It checks `screen.getCursorScreenPoint()` every 250 ms. The phone remote never moves the real cursor (it sends events straight to pages), so only the real mouse counts as movement.
 - Hiding adds a constructed stylesheet (`*, *::before, *::after { cursor: none !important }`) to `document.adoptedStyleSheets` in every frame of the home screen and the open site. A constructed stylesheet is used because a site's Content Security Policy can block an injected `<style>` element, but not this. Showing removes it.

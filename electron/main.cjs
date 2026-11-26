@@ -223,7 +223,8 @@ function createWindow() {
     },
     onStateChange: (state) => remote?.broadcast({ t: 'state', ...state }),
   });
-  // Hides the computer's mouse cursor after 5 seconds still, while a phone is connected.
+  // Hides the computer's mouse cursor while a phone is connected: right away, and
+  // again after 5 seconds still once the mouse has moved.
   cursorHider = createCursorHider({
     win,
     pages: () => [win.webContents, inApp.page()?.wc].filter(Boolean),

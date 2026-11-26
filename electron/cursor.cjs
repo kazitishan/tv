@@ -1,5 +1,6 @@
-// Hides the computer's own mouse cursor after it sits still for a while, so it
-// doesn't sit on top of a video. Only used while a phone remote is connected.
+// Hides the computer's own mouse cursor while a phone remote is connected, so it
+// doesn't sit on top of a video: right away when the phone connects, and again
+// after the mouse sits still for a while once it has been moved.
 //
 // The real mouse is watched by polling its screen position. The phone remote
 // sends mouse events straight to the pages and never moves the real cursor, so
@@ -68,7 +69,10 @@ function createCursorHider({ win, pages }) {
     if (enabled === value || win.isDestroyed()) return;
     enabled = value;
     if (enabled) {
-      lastPoint = null; // counts as a move, so the 5 seconds start now
+      // A phone just connected: hide the cursor right away. It comes back as
+      // soon as the real mouse moves, and hides again after 5 seconds still.
+      lastPoint = screen.getCursorScreenPoint();
+      lastMoveAt = 0;
       tick();
       timer = setInterval(tick, POLL_MS);
     } else {
