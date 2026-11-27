@@ -91,6 +91,7 @@ function createInAppController(win, { onTextFocus, onTextHover } = {}) {
     win.contentView.removeChildView(view);
     view.webContents.close();
     if (!win.isDestroyed()) {
+      extensions?.selectTab(win.webContents);
       win.webContents.send('in-app:closed');
       win.webContents.focus();
     }
@@ -160,6 +161,13 @@ function createInAppController(win, { onTextFocus, onTextHover } = {}) {
     wc.loadURL(url);
     wc.focus();
   };
+
+  // The home screen is the window's permanent tab for the extensions.
+  // electron-chrome-extensions forgets a window once its last tab closes but
+  // keeps the 'closed', 'focus' and 'resized' listeners it added to it, and adds
+  // them again when the next tab arrives. Without a tab that stays, every site
+  // opened added three more listeners to the window.
+  extensions?.addTab(win.webContents, win);
 
   win.on('resize', layout);
   win.on('closed', () => {
