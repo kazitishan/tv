@@ -52,6 +52,8 @@ electron/
   text-focus.preload.cjs       Tells the main process when a text field on an in-app website has focus
   cursor.cjs                   Hides the computer's mouse cursor while a phone is connected (until the mouse moves)
   updates.cjs                  Checks for and installs updates (git and uBlock Origin); see Updates
+  about.cjs                    Version info and the Wi-Fi network in use, for the About popup
+  drm.cjs, evs-helper.py       DRM video setup from the About popup (castLabs EVS); see DRM video
   remote/
     server.cjs                 The remote server (plain Node entry point): phone page, WebSockets, QR code, starts/stops Electron
     link.cjs                   The TV app's connection to the remote server
@@ -61,9 +63,10 @@ electron/
     public/                    The phone remote page (index.html, remote.css, remote.js)
 src/
   main.jsx, App.jsx            React entry point and root component
-  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus, SettingsMenu, UpdatePopup, Icon)
+  components/                  Home screen UI (TopBar, Hero, CardGrid, Card, Backdrop, Clock, RemotePrompt, RemoteStatus, SettingsMenu, UpdatePopup, AboutPopup, DrmSetup, Icon; popupStyles.jsx has the popups' shared button styles and spinner)
   icons/                       Every UI icon as an SVG (home screen, phone remote and pointer); see Icons
   hooks/useWideImage.js        React hook around utils/wideImage.js
+  hooks/usePhoneKeyboard.js    Opens the phone remote's keyboard for text fields on the home screen
   utils/wideImage.js           Turns square app icons into wide tiles on a canvas
   data/apps.json               The list of streaming services on the home screen
   index.css                    Tailwind setup, theme, animations
@@ -164,6 +167,13 @@ The window's `webContents.id` maps to its controller in `controllers`, so IPC me
 | `checkForUpdates()` | `update:check` (invoke) | renderer → main | `{ app, ublock, canInstall, lastError }`; see [Updates](#updates) |
 | `installUpdates()` | `update:install` (invoke) | renderer → main | Asks the remote server to update; `false` if it can't be reached |
 | `quit()` | `app:quit` | renderer → main | Quits the TV app (the gear menu's Quit), like Power on the phone; the remote server keeps running |
+| `getAppInfo()` | `about:info` (invoke) | renderer → main | `{ version, commit, date, electron, ublock }` for the About popup |
+| `getWifi()` | `about:wifi` (invoke) | renderer → main | `{ name }` of the Wi-Fi network in use (`null` if none); takes a few seconds on a Mac |
+| `getDrmStatus()` | `drm:status` (invoke) | renderer → main | `{ toolInstalled, signed, daysLeft, needsRestart, accountName, widevine }`; see [DRM video](#drm-video-widevine) |
+| `drm.installTool()`, `drm.sign()`, `drm.signUp(d)`, `drm.resendCode(d)`, `drm.confirm(d)`, `drm.signIn(d)` | `drm:install`, `drm:sign`, `drm:signup`, `drm:resend`, `drm:confirm`, `drm:signin` (invoke) | renderer → main | DRM setup steps; each resolves to `{ ok: true }` or `{ ok: false, error, code?, needsSignIn? }` |
+| `drm.restart()` | `drm:restart` (invoke) | renderer → main | Asks the remote server to turn the app off and on (the new signature takes effect at startup); `false` if it can't |
+| `reportTextFocus(open)` | `home:text-focus` | renderer → main | A text field on the home screen got or lost focus; broadcast to the phones as `keyboard` |
+| `reportTextHover(over)` | `home:text-hover` | renderer → main | The pointer moved onto or off a home-screen text field (or a `data-opens-keyboard` button); feeds `textHover` |
 
 The `on…` methods return an unsubscribe function, which the React effects return as cleanup.
 
@@ -192,7 +202,7 @@ Components:
 | [Clock](src/components/Clock.jsx) | Day, date and time, like "Sun Nov 8 2:48 PM" (in the system's language and 12/24-hour setting), updated every second. |
 | [RemotePrompt](src/components/RemotePrompt.jsx) | QR code popup with the link, a warning when the computer has no network, and "Continue without connecting controller". Esc closes it. |
 | [RemoteStatus](src/components/RemoteStatus.jsx) | The green dot; clicking it shows "Remote control connected" for 3 seconds. |
-| [SettingsMenu](src/components/SettingsMenu.jsx) | The gear button's dropdown: "Check for updates" (opens `UpdatePopup`) and "Quit" (with a power icon; calls `window.tv.quit()`). Up/Down move between items; Esc, a click outside or picking an item closes it. The top bar is raised above the card grid while it's open. |
+| [SettingsMenu](src/components/SettingsMenu.jsx) | The gear button's dropdown: "About" (opens `AboutPopup`), "Check for updates" (opens `UpdatePopup`) and "Quit" (with a power icon; calls `window.tv.quit()`). Up/Down move between items; Esc, a click outside or picking an item closes it. The top bar is raised above the card grid while it's open. |
 | [UpdatePopup](src/components/UpdatePopup.jsx) | Checks for updates when opened. Shows "Up to date", or what's new (the first 5 commit messages and the uBlock Origin version) with "Update and restart", or why the check failed. Also shows why the last update failed, if it did. |
 
 **Wide tiles.** Logos in `public/logos/` are square, but tiles are 5:3. [wideImage.js](src/utils/wideImage.js) draws each icon centered on a 750×450 canvas and fills the sides by stretching and blurring a thin strip from the icon's left and right edges, so the background looks seamless. If an app sets `bg` in `apps.json`, the sides are that solid colour instead (for logos that touch the icon's edges). Results are cached per image, and the tile shows the original icon until the wide version is ready.
@@ -251,13 +261,13 @@ Server → app:
 
 | Message | Meaning |
 |---|---|
-| `{ t: 'hello', url, qr, lanAvailable, connected, updates, updateError }` | Sent on connect: the phone link, its QR code (PNG data URL), whether a phone is already connected, that the server can install updates (`updates: true`), and why the last update failed (or `null`) |
+| `{ t: 'hello', url, qr, lanAvailable, connected, updates, restart, updateError }` | Sent on connect: the phone link, its QR code (PNG data URL), whether a phone is already connected, that the server can install updates (`updates: true`) and restart the app (`restart: true`), and why the last update failed (or `null`) |
 | `{ t: 'status', connected }` | A phone connected or left |
 | `{ t: 'phone-connected' }` | A phone connected (or one was already connected when the app connected); the app replies with its volume state |
 | `{ t: 'command', msg }` | A phone command (see below) |
 | `{ t: 'quit' }` | Power was pressed; the app calls `app.quit()` |
 
-App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state` and `keyboard`). `{ t: 'update' }` asks the server to install updates (the gear popup's "Update and restart").
+App → server: `{ t: 'broadcast', msg }` sends `msg` to every phone (used for `state` and `keyboard`). `{ t: 'update' }` asks the server to install updates (the gear popup's "Update and restart"). `{ t: 'restart' }` asks it to turn the app off and on again (`restartTv()`: `stopTv()`, then `startTv()` when the app has exited), after DRM video setup.
 
 ### Message protocol
 
@@ -281,7 +291,7 @@ Computer → phone:
 |---|---|
 | `{ t: 'state', volume, muted }` | Current volume. Sent when a phone connects, when the TV app starts with a phone connected, and when the volume changes. Sent by the TV app, through the server. |
 | `{ t: 'tv', state }` | The TV app is `off`, `starting`, `on`, `stopping` or `updating`. Sent by the server when a phone connects and whenever it changes. |
-| `{ t: 'textHover', over }` | Whether the pointer is over a text field on the open website. Sent when it changes and when a phone connects. Sent by the TV app, through the server. |
+| `{ t: 'textHover', over }` | Whether the pointer is over a text field on the open website (or on the home screen, through `usePhoneKeyboard`). Sent when it changes and when a phone connects. Sent by the TV app, through the server. |
 | `{ t: 'keyboard', open }` | A text field on the open website got focus (`true`, sent again for each new field) or lost it (`false`). Sent by the TV app, through the server. |
 
 The remote server handles `power` itself. Everything else reaches `main.cjs` as a `command` and goes to `remoteControl.handle()`.
@@ -364,6 +374,15 @@ Most streaming services encrypt video with Google's Widevine DRM. Stock Electron
 
 - `loadWidevine()` waits for `components.whenReady()`, which downloads or updates the Widevine module on first launch, then logs `Widevine ready`. On stock Electron, `components` is undefined and it logs `Widevine unavailable`.
 - **VMP signing.** Widevine has security levels. castLabs' builds are signed for development only, and services like Prime Video and Netflix reject that ("You are running an old or unsupported version of this browser"). castLabs' free EVS service signs the Electron app for production (Verified Media Path). The `evs:*` and `sign:vmp` scripts install castLabs' Python tool into `.venv-evs/` and sign `node_modules/electron/dist`. That folder only exists after the first launch, and reinstalling Electron replaces it, so signing happens after the first launch and again after every reinstall.
+- **About popup.** [AboutPopup](src/components/AboutPopup.jsx) (gear menu → About) shows the app's version and commit, the Wi-Fi network in use ([about.cjs](electron/about.cjs): `system_profiler` on a Mac, which still shows the name on macOS 14+ where other tools hide it; `netsh` on Windows; `nmcli` on Linux), whether DRM video is set up, and the uBlock Origin and Electron versions. "Set up" is a green check with the days the signature has left, plus a note if Widevine itself didn't load (`widevineState`, set by `loadWidevine()`).
+- **Setup from the TV.** If the app isn't signed, About has a Set up button that opens [DrmSetup](src/components/DrmSetup.jsx), which does what the README's `evs:*` and `sign:vmp` scripts do:
+  1. Installs castLabs' tool into `.venv-evs` if it's missing (`python3 -m venv`, then `pip install castlabs-evs`).
+  2. If there's a saved castLabs sign-in (in `~/.config/evs/config.json`), signs straight away.
+  3. Otherwise asks to create an account (first and last name, email, account name suggested from the email, password; the organization is sent as "Personal") or sign in. A new account needs the code castLabs emails; "Send a new code" asks for another. Signing in to an account that was never confirmed goes to the code step.
+  4. Signs the app, then offers "Restart to finish", which sends `restart` to the remote server (or says to restart from the terminal if the server is too old).
+
+  [drm.cjs](electron/drm.cjs) runs [evs-helper.py](electron/evs-helper.py) with the venv's Python (`-I`). The helper reads one JSON request on stdin, so passwords never appear in the process list, calls the `castlabs_evs` package directly in non-interactive mode, and prints one JSON reply. EVS's own log goes to stderr, which ends up in the terminal. Errors carry the AWS Cognito error code (like `CodeMismatchException`), which drm.cjs turns into a message for the screen. The status check uses `verify-pkg` (offline, well under a second). Signing first keeps a valid existing signature; otherwise it uploads the Electron framework, which can take a minute. Only one setup step runs at a time, and the `drm:*` handlers only answer the home screen.
+- **Phone keyboard.** The setup forms are filled in with the phone remote. [usePhoneKeyboard](src/hooks/usePhoneKeyboard.js) reports focus and hover of home-screen text fields like the site preload does, and buttons marked `data-opens-keyboard` ("Create a castLabs account", "I already have an account") count as text fields for hover, so a phone tap on them opens the keyboard during the tap. In the forms, Enter moves to the next empty field and submits when all are filled, and the last field gets focus back after a failed step.
 
 ## Updates
 
@@ -402,7 +421,7 @@ There's no packaging step (no installer or `.app` bundle); the app runs from the
 
 - **Websites** run in a sandboxed `WebContentsView` with context isolation and only the text-focus preload (which exposes nothing), so they can't reach Node or `window.tv`. Only `http(s)` URLs can be opened, and pop-ups go to the default browser.
 - **The home screen** has context isolation and only the small `window.tv` API.
-- **The phone remote** has no token: anyone on the local network who opens the link can use it. It can control the app's pages (pointer, keys, text, navigation, volume) and turn the TV app off and on, but can't reach other apps or the file system. The connection is unencrypted HTTP on the local network.
+- **The phone remote** has no token: anyone on the local network who opens the link can use it. It can control the app's pages (pointer, keys, text, navigation, volume) and turn the TV app off and on, but can't reach other apps or the file system. Through the home screen's About popup it can also run the DRM setup (create or sign in to a castLabs account and sign the app); castLabs passwords typed on the phone travel over the unencrypted local connection. The connection is unencrypted HTTP on the local network.
 - **The TV app's link** to the remote server only accepts loopback connections with the per-run key, so phones can't send it messages that pose as the server's.
 - **The remote control** runs JavaScript in site frames (`executeJavaScript`) for the volume and cursor features; those scripts only touch media volume and stylesheets.
 

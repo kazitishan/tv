@@ -6,6 +6,8 @@ import Hero from './components/Hero.jsx';
 import RemotePrompt from './components/RemotePrompt.jsx';
 import TopBar from './components/TopBar.jsx';
 import UpdatePopup from './components/UpdatePopup.jsx';
+import AboutPopup from './components/AboutPopup.jsx';
+import usePhoneKeyboard from './hooks/usePhoneKeyboard.js';
 
 const backdropImages = apps.map((app) => app.img);
 
@@ -27,7 +29,11 @@ export default function App() {
   const [showRemotePrompt, setShowRemotePrompt] = useState(false);
   const [showMenu, setShowMenu] = useState(false); // the gear button's dropdown
   const [showUpdates, setShowUpdates] = useState(false); // "Check for updates" popup
+  const [showAbout, setShowAbout] = useState(false); // "About" popup
   const current = apps[focused];
+
+  // Text fields on the home screen (like DRM setup in About) open the phone remote's keyboard.
+  usePhoneKeyboard();
 
   // Back / Forward / Refresh state of the open website, for the top bar.
   const [navState, setNavState] = useState(INITIAL_NAV_STATE);
@@ -95,6 +101,7 @@ export default function App() {
         onNavigate={(action) => tv?.navigateInApp(action)}
         remoteConnected={remoteConnected}
         onShowRemote={tv?.getRemoteInfo ? () => setShowRemotePrompt(true) : null}
+        onShowAbout={tv?.getAppInfo ? () => setShowAbout(true) : null}
         onShowUpdates={tv?.checkForUpdates ? () => setShowUpdates(true) : null}
         onQuit={tv?.quit ? () => tv.quit() : null}
         menuOpen={showMenu && !openAppName}
@@ -109,11 +116,12 @@ export default function App() {
         focusedIndex={focused}
         onFocusChange={setFocused}
         onSelect={openApp}
-        active={!showRemotePrompt && !showUpdates && !showMenu}
+        active={!showRemotePrompt && !showUpdates && !showAbout && !showMenu}
       />
 
       {showRemotePrompt && <RemotePrompt onClose={() => setShowRemotePrompt(false)} />}
       {showUpdates && !showRemotePrompt && <UpdatePopup onClose={() => setShowUpdates(false)} />}
+      {showAbout && !showRemotePrompt && <AboutPopup onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

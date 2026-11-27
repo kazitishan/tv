@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from './Icon.jsx';
+import { PRIMARY, SECONDARY, Spinner } from './popupStyles.jsx';
 
 // The update turns this app off within seconds; if it's still here, it didn't start.
 const INSTALL_TIMEOUT_MS = 20_000;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-const PRIMARY =
-  'w-full cursor-pointer rounded-2xl bg-white px-5 py-3.5 text-[16px] font-semibold text-black outline-none transition-colors hover:bg-white/85 focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900';
-const SECONDARY =
-  'w-full cursor-pointer rounded-2xl bg-white/10 px-5 py-3.5 text-[16px] font-semibold text-white/90 outline-none transition-colors hover:bg-white/20 focus-visible:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/40';
-
-function Spinner() {
-  return <span aria-hidden className="size-9 animate-spin rounded-full border-[3px] border-white/15 border-t-white/80" />;
-}
 
 function Check() {
   return (

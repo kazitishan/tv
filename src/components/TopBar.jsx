@@ -34,6 +34,7 @@ export default function TopBar({
   onNavigate,
   remoteConnected,
   onShowRemote,
+  onShowAbout,
   onShowUpdates,
   onQuit,
   menuOpen,
@@ -41,7 +42,7 @@ export default function TopBar({
   onCloseMenu,
 }) {
   const gearRef = useRef(null);
-  const showGear = (onShowUpdates || onQuit) && !openAppName;
+  const showGear = (onShowAbout || onShowUpdates || onQuit) && !openAppName;
   return (
     // Raised above the card grid (also z-1, later in the page) while the menu is open.
     <header className={`app-drag relative flex ${menuOpen ? 'z-20' : 'z-1'} h-14 shrink-0 items-center justify-between pr-14 pl-24`}>
@@ -96,6 +97,7 @@ export default function TopBar({
               <SettingsMenu
                 anchorRef={gearRef}
                 onClose={onCloseMenu}
+                onAbout={onShowAbout}
                 onCheckForUpdates={onShowUpdates}
                 onQuit={onQuit}
               />

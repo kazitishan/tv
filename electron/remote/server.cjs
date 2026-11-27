@@ -76,6 +76,7 @@ let port = PORT;
 const tv = { child: null, state: 'off', killTimer: null };
 let exiting = false;
 let updating = false;
+let restarting = false; // restartTv(): start the app again once it has quit
 let updateError = null; // why the last update failed, shown in the TV app's update popup
 
 const broadcast = (msg) => {
@@ -116,6 +117,11 @@ function startTv() {
     appSocket = null;
     if (exiting) process.exit(0);
     if (updating) return; // updateAndRestart() takes it from here
+    if (restarting) {
+      restarting = false;
+      startTv();
+      return;
+    }
     console.log('The TV is off. Press Power on the phone remote to turn it on.');
     setTvState('off');
   };
@@ -142,6 +148,17 @@ function togglePower() {
   if (tv.state === 'off') startTv();
   else if (tv.state === 'starting' || tv.state === 'on') stopTv();
   // 'stopping' or 'updating': ignore
+}
+
+/**
+ * Turns the TV app off and on again, for changes that only take effect when it
+ * starts (DRM video setup, from the app's About popup).
+ */
+function restartTv() {
+  if (!tv.child || updating || exiting || restarting) return;
+  console.log('Restarting the TV');
+  restarting = true;
+  stopTv();
 }
 
 /* ---------- Updates ---------- */
@@ -246,8 +263,9 @@ phoneWss.on('connection', (ws) => {
 appWss.on('connection', (ws) => {
   appSocket?.terminate(); // only one TV app at a time
   appSocket = ws;
-  // `updates`: this server installs updates (older ones ignore `update`).
-  sendToApp({ t: 'hello', ...remoteInfo, connected: phones.size > 0, updates: true, updateError });
+  // `updates` / `restart`: this server installs updates and restarts the app
+  // (older ones ignore `update` / `restart`).
+  sendToApp({ t: 'hello', ...remoteInfo, connected: phones.size > 0, updates: true, restart: true, updateError });
   if (phones.size > 0) sendToApp({ t: 'phone-connected' });
   if (tv.state === 'starting') setTvState('on');
 
@@ -255,6 +273,7 @@ appWss.on('connection', (ws) => {
     const msg = parse(data);
     if (msg?.t === 'broadcast' && msg.msg) broadcast(msg.msg);
     else if (msg?.t === 'update') updateAndRestart();
+    else if (msg?.t === 'restart') restartTv();
   });
   ws.on('close', () => {
     if (appSocket === ws) appSocket = null;

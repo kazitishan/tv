@@ -37,4 +37,28 @@ contextBridge.exposeInMainWorld('tv', {
 
   // Turns the TV app off (the gear menu's Quit), like the phone's Power button.
   quit: () => ipcRenderer.send('app:quit'),
+
+  // About popup (gear menu). getAppInfo(): { version, commit, date, electron, ublock }.
+  // getWifi(): { name } (null when not on Wi-Fi); takes a few seconds on a Mac.
+  getAppInfo: () => ipcRenderer.invoke('about:info'),
+  getWifi: () => ipcRenderer.invoke('about:wifi'),
+  // DRM video setup (castLabs EVS). getDrmStatus(): { toolInstalled, signed, daysLeft,
+  //   needsRestart, accountName, widevine }. The steps resolve to { ok: true } or
+  //   { ok: false, error, code?, needsSignIn? }.
+  getDrmStatus: () => ipcRenderer.invoke('drm:status'),
+  drm: {
+    installTool: () => ipcRenderer.invoke('drm:install'),
+    sign: () => ipcRenderer.invoke('drm:sign'),
+    signUp: (details) => ipcRenderer.invoke('drm:signup', details), // { accountName, password, email, firstName, lastName }
+    resendCode: (details) => ipcRenderer.invoke('drm:resend', details), // { accountName }
+    confirm: (details) => ipcRenderer.invoke('drm:confirm', details), // { accountName, password, code }
+    signIn: (details) => ipcRenderer.invoke('drm:signin', details), // { accountName, password }
+    // Has the remote server turn the app off and on; false if it can't.
+    restart: () => ipcRenderer.invoke('drm:restart'),
+  },
+
+  // A text field on the home screen got focus (true) or lost it (false), or the
+  // pointer moved onto or off one: opens the phone remote's keyboard.
+  reportTextFocus: (open) => ipcRenderer.send('home:text-focus', open),
+  reportTextHover: (over) => ipcRenderer.send('home:text-hover', over),
 });

@@ -6,6 +6,8 @@ const { createRemoteLink } = require('./remote/link.cjs');
 const { createRemoteControl } = require('./remote/control.cjs');
 const { createCursorHider } = require('./cursor.cjs');
 const { checkForUpdates } = require('./updates.cjs');
+const { getAppInfo, getWifi } = require('./about.cjs');
+const drm = require('./drm.cjs');
 
 // Unpacked uBlock Origin, downloaded by scripts/fetch-ublock.cjs (runs on npm install).
 const UBLOCK_PATH = path.join(__dirname, '..', 'extensions', 'ublock-origin');
@@ -276,11 +278,12 @@ let remote = null; // link to the remote server
 
 // Whether the phone's pointer is over a text field on the open website: the site
 // says what's under its pointer (page), but the pointer may have moved onto the
-// top bar since, which the site doesn't see (pointerOnPage).
-const textHover = { page: false, pointerOnPage: false, sent: false };
+// top bar since, which the site doesn't see (pointerOnPage). Or over a text
+// field on the home screen (home), when the pointer is there.
+const textHover = { page: false, pointerOnPage: false, home: false, sent: false };
 
 function sendTextHover({ force = false } = {}) {
-  const over = textHover.page && textHover.pointerOnPage;
+  const over = textHover.pointerOnPage ? textHover.page : textHover.home;
   if (over === textHover.sent && !force) return;
   textHover.sent = over;
   remote?.broadcast({ t: 'textHover', over });
@@ -333,6 +336,60 @@ ipcMain.handle('update:check', async () => ({
 
 ipcMain.handle('update:install', () => remote?.requestUpdate() ?? false);
 
+/* ---------- About (gear button) ---------- */
+
+const fromHomeScreen = (event) => event.sender === mainWindow?.webContents;
+const isString = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max;
+
+ipcMain.handle('about:info', (event) => (fromHomeScreen(event) ? getAppInfo() : null));
+ipcMain.handle('about:wifi', (event) => (fromHomeScreen(event) ? getWifi() : null));
+
+// DRM video setup (see drm.cjs). One step at a time: each runs castLabs' tool.
+let drmBusy = false;
+const drmStep = (handler) => async (event, details) => {
+  if (!fromHomeScreen(event)) return { ok: false, error: 'Not allowed.' };
+  if (drmBusy) return { ok: false, error: 'Another step is still running.' };
+  drmBusy = true;
+  try {
+    return await handler(details ?? {});
+  } finally {
+    drmBusy = false;
+  }
+};
+// castLabs account fields: names and emails are short; passwords at least 8 characters.
+const validAccount = (d, { password = true, code = false, profile = false } = {}) =>
+  isString(d.accountName, 128) &&
+  (!password || isString(d.password, 256)) &&
+  (!code || (isString(d.code, 16) && /^\d+$/.test(d.code))) &&
+  (!profile || (isString(d.email, 254) && isString(d.firstName, 128) && isString(d.lastName, 128)));
+const invalid = { ok: false, error: 'Some details are missing.' };
+
+ipcMain.handle('drm:status', async (event) =>
+  fromHomeScreen(event) ? { ...(await drm.getDrmStatus()), widevine: widevineState } : null
+);
+ipcMain.handle('drm:install', drmStep(() => drm.installTool()));
+ipcMain.handle('drm:sign', drmStep(() => drm.signApp()));
+ipcMain.handle('drm:signup', drmStep((d) => (validAccount(d, { profile: true }) ? drm.signUp(d) : invalid)));
+ipcMain.handle('drm:resend', drmStep((d) => (validAccount(d, { password: false }) ? drm.resendCode(d) : invalid)));
+ipcMain.handle('drm:confirm', drmStep((d) => (validAccount(d, { code: true }) ? drm.confirmAccount(d) : invalid)));
+ipcMain.handle('drm:signin', drmStep((d) => (validAccount(d) ? drm.signIn(d) : invalid)));
+// The signature takes effect when the app starts: the remote server turns it off and on.
+ipcMain.handle('drm:restart', (event) => (fromHomeScreen(event) ? (remote?.requestRestart() ?? false) : false));
+
+/* ---------- Home screen text fields (phone keyboard) ---------- */
+
+// Text fields on the home screen (like the About popup's DRM setup) open the
+// phone remote's keyboard like the ones on websites do. The home screen reports
+// them from React (src/hooks/usePhoneKeyboard.js).
+ipcMain.on('home:text-focus', (event, open) => {
+  if (fromHomeScreen(event)) remote?.broadcast({ t: 'keyboard', open: Boolean(open) });
+});
+ipcMain.on('home:text-hover', (event, over) => {
+  if (!fromHomeScreen(event)) return;
+  textHover.home = Boolean(over);
+  sendTextHover();
+});
+
 /* ---------- Ad blocker ---------- */
 
 async function loadAdBlocker() {
@@ -367,15 +424,20 @@ async function loadAdBlocker() {
 // Streaming services (Prime Video, Netflix, Disney+, ...) need the Widevine CDM.
 // Only castLabs' Electron for Content Security provides it, through the
 // `components` API; on stock Electron this does nothing and DRM video won't play.
+let widevineState = 'loading'; // 'loading' | 'ready' | 'failed' | 'unavailable', for the About popup
+
 async function loadWidevine() {
   if (!components) {
+    widevineState = 'unavailable';
     console.warn('Widevine unavailable: stock Electron is installed. See "DRM video" in README.md.');
     return;
   }
   try {
     await components.whenReady(); // downloads/updates the CDM on first launch
+    widevineState = 'ready';
     console.log('Widevine ready:', JSON.stringify(components.status()));
   } catch (err) {
+    widevineState = 'failed';
     console.error('Widevine failed to load; DRM video will not play:', err);
   }
 }

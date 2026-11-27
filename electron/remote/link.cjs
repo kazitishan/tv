@@ -12,7 +12,7 @@ const READY_TIMEOUT_MS = 3000; // give up waiting for the server's first message
  * Connects to the remote server. Callbacks: `onCommand(msg)` for each phone
  * command, `onPhoneConnected()` when a phone connects (reply with the volume
  * state), `onStatusChange()` when phones connect or leave, `onQuit()` on Power.
- * Returns { ready, info(), connected(), canUpdate(), updateError(), requestUpdate(),
+ * Returns { ready, info(), connected(), canUpdate(), updateError(), requestUpdate(), requestRestart(),
  * broadcast(msg), close() }; `ready` resolves to info() once the server has
  * said hello, or null if it can't.
  */
@@ -21,6 +21,7 @@ function createRemoteLink({ url, onCommand, onPhoneConnected, onStatusChange, on
   let info = null; // { url, qr, lanAvailable } of the phone remote
   let phonesConnected = false;
   let canUpdate = false; // the server can install updates (a server from before updates can't)
+  let canRestart = false; // the server can restart this app (older servers can't)
   let updateError = null; // why the server's last update failed, if it did
   let closed = false;
   let retryTimer = null;
@@ -50,6 +51,7 @@ function createRemoteLink({ url, onCommand, onPhoneConnected, onStatusChange, on
         info = { url: msg.url, qr: msg.qr, lanAvailable: msg.lanAvailable };
         phonesConnected = Boolean(msg.connected);
         canUpdate = msg.updates === true;
+        canRestart = msg.restart === true;
         updateError = typeof msg.updateError === 'string' ? msg.updateError : null;
         resolveReady(info);
         onStatusChange?.();
@@ -89,6 +91,15 @@ function createRemoteLink({ url, onCommand, onPhoneConnected, onStatusChange, on
     requestUpdate() {
       if (!canUpdate || ws?.readyState !== WebSocket.OPEN) return false;
       ws.send(JSON.stringify({ t: 'update' }));
+      return true;
+    },
+    /**
+     * Asks the server to turn this app off and on again. Returns false if the
+     * server can't be reached or is too old to do it.
+     */
+    requestRestart() {
+      if (!canRestart || ws?.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify({ t: 'restart' }));
       return true;
     },
     /** Sends a message to every connected phone. */
