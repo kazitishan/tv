@@ -4,14 +4,15 @@ Turn any PC or laptop into a TV with built-in ad blocking, and use your phone as
 
 ## Before setting up
 
-Make sure you have Node.js and Git downloaded
+### Required
 
 **Node.js**: download the **LTS** installer from [nodejs.org](https://nodejs.org/) and run it.
 
-**Git**:
+**Git**: download the installer from [git-scm.com](https://git-scm.com/downloads) and run it. The default options are fine.
 
-- **Mac:** open Terminal and run `xcode-select --install`, then click **Install**.
-- **Windows:** download the installer from [git-scm.com](https://git-scm.com/downloads) and run it. The default options are fine.
+### Optional
+
+**Python**: download the installer from [python.org](https://www.python.org/downloads/). This is only needed for DRM video (Netflix, Prime Video, Disney+ and similar services).
 
 ## Setting up
 
@@ -26,8 +27,7 @@ npm install
 **2. Start it**
 
 ```bash
-npm run dev    # development, with live reload for the UI
-npm start      # or: build and run the production version
+npm start
 ```
 
 The first launch takes a few minutes, because it downloads the video player. Leave the terminal open while you use the TV. To stop the app completely, press **Ctrl+C** in the terminal.
@@ -40,21 +40,7 @@ Scan the QR code on the TV with your phone's camera. Your phone needs to be on t
 
 Netflix, Prime Video, Disney+ and similar services won't play video until you do this. Without it, you may see something like "You are running an old or unsupported version of this browser".
 
-Do this after the app has launched once. Make sure Python is downloaded from [python.org](https://www.python.org/downloads/).
-
 The easiest way is from the TV: click the **gear** at the top right of the home screen, choose **About**, and click **Set up** next to DRM video. It creates a free castLabs account (enter your name, email and a password, then the code they email you), signs the app, and restarts the TV. You can type with the phone remote's keyboard. **About** shows a green check once it's done.
-
-Or from the terminal: quit the app with **Ctrl+C**, then run:
-
-```bash
-npm run evs:setup
-npm run evs:signup
-npm run sign:vmp
-```
-
-`evs:signup` creates a free castLabs account: enter your email, then the code they send you. Then run `npm start` again.
-
-If DRM video stops working after an update, open **About** and click **Set up** again, or run `npm run sign:vmp`.
 
 ## Updating
 
