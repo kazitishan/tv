@@ -10,6 +10,9 @@
   --amber: #ffb340;
   --red: #ff453a;
   --radius: 20px;
+  /* Space kept clear of the notch and home bar; follows the page when it's turned. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 * {
@@ -56,6 +59,28 @@ svg.filled {
   stroke: none;
 }
 
+/* Turned back upright on a sideways phone (see "Portrait lock" in remote.js).
+   remote.js sets --page-w and --page-h to the page's size, which is the
+   screen's size swapped. The notch side becomes the top of the page. */
+html[data-turn] body {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--page-w);
+  height: var(--page-h);
+  transform-origin: 0 0;
+}
+html[data-turn='-90'] body {
+  transform: translateY(var(--page-w)) rotate(-90deg);
+  --safe-top: env(safe-area-inset-left, 0px);
+  --safe-bottom: env(safe-area-inset-right, 0px);
+}
+html[data-turn='90'] body {
+  transform: translateX(var(--page-h)) rotate(90deg);
+  --safe-top: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-left, 0px);
+}
+
 [hidden] {
   display: none !important;
 }
@@ -66,10 +91,10 @@ svg.filled {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  height: 100dvh;
+  height: var(--page-h, 100dvh);
   max-width: 480px;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 16px);
+  padding: calc(var(--safe-top) + 12px) 16px calc(var(--safe-bottom) + 16px);
 }
 
 .top {
@@ -375,7 +400,7 @@ input[type='range']::-moz-range-thumb {
   top: 0;
   max-width: 480px;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 16px) 16px 18px;
+  padding: calc(var(--safe-top) + 16px) 16px 18px;
   border-radius: 0 0 26px 26px;
   background: #1c1c22;
   animation: drop 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -509,21 +534,20 @@ input[type='range']::-moz-range-thumb {
   }
 }
 
-/* Short screens (e.g. small phones in Safari with toolbars) */
-@media (max-height: 640px) {
-  .remote {
-    gap: 10px;
-  }
-  .round {
-    width: 58px;
-    height: 58px;
-  }
-  .round.play {
-    width: 70px;
-    height: 70px;
-  }
-  .key,
-  .type-btn {
-    height: 48px;
-  }
+/* Short pages (e.g. small phones in Safari with toolbars). Set by remote.js
+   from the page's height, which differs from the screen's when it's turned. */
+.short .remote {
+  gap: 10px;
+}
+.short .round {
+  width: 58px;
+  height: 58px;
+}
+.short .round.play {
+  width: 70px;
+  height: 70px;
+}
+.short .key,
+.short .type-btn {
+  height: 48px;
 }

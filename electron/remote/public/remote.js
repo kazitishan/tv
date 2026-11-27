@@ -25,6 +25,54 @@
       .catch(() => {}); // the button still has its label
   }
 
+  /* ---------- Portrait lock ---------- */
+
+  // A web page can't lock its orientation on a phone (only Android, in
+  // fullscreen), so when a phone is turned sideways the page is turned back the
+  // other way and stays upright on the phone. While the typing sheet is open it
+  // isn't turned, because the phone's keyboard follows the screen and would
+  // cover the text box. Touch positions come in screen coordinates, so the
+  // trackpad turns them into page coordinates with toPage().
+  const root = document.documentElement;
+  const isPhone = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600;
+  let turn = 0; // how far the page is rotated: 0, -90 or 90 degrees
+  screen.orientation?.lock?.('portrait').catch(() => {});
+
+  const screenAngle = () => {
+    const angle = screen.orientation?.angle ?? window.orientation ?? 0;
+    return ((angle % 360) + 360) % 360;
+  };
+
+  const updateTurn = () => {
+    const angle = screenAngle();
+    const typing = !document.getElementById('sheet').hidden;
+    turn = !isPhone || typing ? 0 : angle === 90 ? -90 : angle === 270 ? 90 : 0;
+    const width = turn ? innerHeight : innerWidth;
+    const height = turn ? innerWidth : innerHeight;
+    if (turn) {
+      root.dataset.turn = String(turn);
+      root.style.setProperty('--page-w', `${width}px`);
+      root.style.setProperty('--page-h', `${height}px`);
+    } else {
+      delete root.dataset.turn;
+      root.style.removeProperty('--page-w');
+      root.style.removeProperty('--page-h');
+    }
+    // Compact layout for short pages (a media query would see the screen, not the page).
+    root.classList.toggle('short', height <= 640);
+  };
+  updateTurn();
+  addEventListener('resize', updateTurn);
+  addEventListener('orientationchange', updateTurn);
+  screen.orientation?.addEventListener('change', updateTurn);
+
+  /** A point on the screen (like a touch's clientX/clientY) in the page's own coordinates. */
+  const toPage = (x, y) => {
+    if (turn === -90) return { x: innerHeight - y, y: x };
+    if (turn === 90) return { x: y, y: innerWidth - x };
+    return { x, y };
+  };
+
   /* ---------- Connection ---------- */
 
   const status = $('#status');
@@ -131,28 +179,35 @@
     if (!frame) frame = requestAnimationFrame(flush);
   };
 
+  // x, y in page coordinates (see toPage()).
   const showTouch = (x, y) => {
     const r = pad.getBoundingClientRect();
-    touchDot.style.transform = `translate(${x - r.left}px, ${y - r.top}px)`;
+    const a = toPage(r.left, r.top);
+    const b = toPage(r.right, r.bottom);
+    touchDot.style.transform = `translate(${x - Math.min(a.x, b.x)}px, ${y - Math.min(a.y, b.y)}px)`;
   };
 
   pad.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     pad.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = toPage(e.clientX, e.clientY);
+    pointers.set(e.pointerId, { x: p.x, y: p.y, turn });
     if (pointers.size === 1) gesture = { start: performance.now(), travel: 0, fingers: 1 };
     else if (gesture) gesture.fingers = Math.max(gesture.fingers, pointers.size);
     pad.classList.add('touching');
-    showTouch(e.clientX, e.clientY);
+    showTouch(p.x, p.y);
   });
 
   pad.addEventListener('pointermove', (e) => {
     const last = pointers.get(e.pointerId);
     if (!last) return;
-    const dx = e.clientX - last.x;
-    const dy = e.clientY - last.y;
-    last.x = e.clientX;
-    last.y = e.clientY;
+    const p = toPage(e.clientX, e.clientY);
+    // The page turned mid-swipe: start again from here instead of jumping.
+    const dx = last.turn === turn ? p.x - last.x : 0;
+    const dy = last.turn === turn ? p.y - last.y : 0;
+    last.x = p.x;
+    last.y = p.y;
+    last.turn = turn;
     if (gesture) gesture.travel += Math.abs(dx) + Math.abs(dy);
 
     if (pointers.size === 1) {
@@ -160,7 +215,7 @@
       const gain = 1.6 + Math.min(Math.hypot(dx, dy) / 6, 2.6);
       pending.mx += dx * gain;
       pending.my += dy * gain;
-      showTouch(e.clientX, e.clientY);
+      showTouch(p.x, p.y);
     } else {
       pending.sx += (dx * 3) / pointers.size;
       pending.sy += (dy * 3) / pointers.size;
@@ -269,6 +324,7 @@
 
   const openKeyboard = () => {
     sheet.hidden = false;
+    updateTurn();
     input.value = '';
     typed = '';
     input.focus(); // opens the phone keyboard only inside a tap (see applyTvKeyboard)
@@ -279,6 +335,7 @@
     tapOpenTimer = null;
     input.blur();
     sheet.hidden = true;
+    updateTurn();
   };
 
   // Opened by a trackpad tap on a text field, before the TV confirms the field
