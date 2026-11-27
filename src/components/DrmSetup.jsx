@@ -108,7 +108,7 @@ function Buttons({ children }) {
  * the About page (true once the app is signed, so it shows "Restart").
  */
 export default function DrmSetup({ status, onDone }) {
-  // 'working' | 'failed' | 'choose' | 'signup' | 'code' | 'signin' | 'done'
+  // 'working' | 'failed' | 'choose' | 'signup' | 'code' | 'signin' | 'done' | 'already'
   const [step, setStep] = useState('working');
   const [working, setWorking] = useState('Getting ready…');
   const [error, setError] = useState(null);
@@ -158,7 +158,7 @@ export default function DrmSetup({ status, onDone }) {
   const sign = async (backTo) => {
     const result = await run(() => tv.drm.sign(), 'Signing the app…');
     if (!result) return;
-    if (result.ok) setStep('done');
+    if (result.ok) setStep(result.alreadySigned ? 'already' : 'done');
     else if (result.needsSignIn) setStep('choose');
     else {
       setError(result.error);
@@ -166,9 +166,12 @@ export default function DrmSetup({ status, onDone }) {
     }
   };
 
-  // Start: install the tool if needed, then sign with a saved sign-in if there is one.
+  // Start: install the tool if needed (then check again: the signature can only
+  // be checked with it, and may be fine already), then sign with a saved
+  // sign-in if there is one.
   useEffect(() => {
     (async () => {
+      let { accountName } = status;
       if (!status.toolInstalled) {
         const result = await run(() => tv.drm.installTool(), 'Installing castLabs’ tool…');
         if (!result) return;
@@ -177,8 +180,16 @@ export default function DrmSetup({ status, onDone }) {
           setStep('failed');
           return;
         }
+        const fresh = await run(() => tv.getDrmStatus(), 'Checking the app…');
+        if (!fresh) return;
+        if (fresh.signed) {
+          setStep('already');
+          return;
+        }
+        accountName = fresh.accountName;
+        if (accountName) setDetails((d) => ({ ...d, accountName }));
       }
-      if (status.accountName) sign('choose');
+      if (accountName) sign('choose');
       else setStep('choose');
     })();
     // Runs once, when setup opens.
@@ -278,16 +289,19 @@ export default function DrmSetup({ status, onDone }) {
     );
   }
 
-  if (step === 'done') {
+  if (step === 'done' || step === 'already') {
+    const already = step === 'already';
     return (
       <div className="flex flex-col items-center text-center">
         <span aria-hidden className="grid size-14 place-items-center rounded-full bg-green-400/15 text-green-400">
           <Icon name="check" className="size-7" />
         </span>
         <h2 id="drm-title" className="mt-5 text-[26px] font-bold tracking-[-0.01em]">
-          DRM video is set up
+          {already ? 'DRM video was already set up' : 'DRM video is set up'}
         </h2>
-        <p className="mt-2 text-[15px] text-white/55">Restart the TV to start using it.</p>
+        <p className="mt-2 text-[15px] text-white/55">
+          {already ? 'This app already has a valid signature.' : 'Restart the TV to start using it.'}
+        </p>
         <div className="mt-7 w-full">
           <button autoFocus onClick={() => onDone(true)} className={PRIMARY}>
             Continue

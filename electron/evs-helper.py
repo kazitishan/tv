@@ -11,7 +11,7 @@
 #   resend   { accountName }
 #   confirm  { accountName, password, code }           (also signs in)
 #   signin   { accountName, password }
-#   sign     { pkg }                                   (uses the saved sign-in)
+#   sign     { pkg }                                   -> { retained }  (uses the saved sign-in)
 # Replies: { "ok": true, ... } or { "ok": false, "code": ..., "message": ... }
 import io
 import json
@@ -77,7 +77,17 @@ def run(req):
     elif op == 'signin':
         Account(no_ask=True).reauth(account_name=req['accountName'], passwd=req['password'])
     elif op == 'sign':
-        VMP(no_ask=True).sign_pkg(req['pkg'])
+        vmp = VMP(no_ask=True)
+        # A valid signature is kept as it is (sign_pkg does that too); say so,
+        # since then nothing changes and the app needn't restart.
+        try:
+            with redirect_stdout(io.StringIO()):
+                vmp.verify_pkg(req['pkg'])
+            return {'ok': True, 'retained': True}
+        except Exception:
+            pass
+        vmp.sign_pkg(req['pkg'])
+        return {'ok': True, 'retained': False}
     else:
         raise ValueError(f'Unknown request: {op}')
     return {'ok': True}

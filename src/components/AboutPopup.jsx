@@ -97,7 +97,7 @@ export default function AboutPopup({ onClose }) {
         <span aria-hidden className="grid size-6 place-items-center rounded-full bg-green-400/15 text-green-400">
           <Icon name="check" className="size-4" />
         </span>
-        Set up
+        Ready
       </>
     );
     drmSub = WIDEVINE_NOTES[drm.widevine] ?? (drm.daysLeft != null ? `Signature valid for ${drm.daysLeft} more days` : null);

@@ -79,15 +79,14 @@ let signedThisRun = false; // the new signature takes effect when the app restar
 
 /**
  * { toolInstalled, signed, daysLeft, needsRestart, accountName }. Signed means
- * the Electron build has a valid VMP signature (checked offline).
+ * the Electron build has a valid production VMP signature (checked offline).
  */
 async function getDrmStatus() {
   if (!toolInstalled()) {
-    // Can't check the signature without the tool; a signature file means it was set up before.
-    const sig = isWindows
-      ? path.join(ELECTRON_DIST, 'electron.exe.sig')
-      : path.join(ELECTRON_DIST, 'Electron.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/Electron Framework.sig');
-    return { toolInstalled: false, signed: fs.existsSync(sig), daysLeft: null, needsRestart: false, accountName: null };
+    // Without the tool the signature can't be checked, and a signature file
+    // proves nothing: castLabs' builds come with a development-only one. So it
+    // counts as not set up; setup installs the tool and keeps a valid signature.
+    return { toolInstalled: false, signed: false, daysLeft: null, needsRestart: false, accountName: null };
   }
   const reply = await helper({ op: 'status', pkg: ELECTRON_DIST });
   return {
@@ -134,13 +133,16 @@ async function installTool() {
   }
 }
 
-/** Signs the Electron build with the saved castLabs sign-in. `needsSignIn` if there's none. */
+/**
+ * Signs the Electron build with the saved castLabs sign-in. `needsSignIn` if
+ * there's none; `alreadySigned` if it had a valid signature (nothing changed).
+ */
 async function signApp() {
   console.log('DRM setup: signing the app (uploads the Electron framework, this takes a minute)');
   const reply = await helper({ op: 'sign', pkg: ELECTRON_DIST }, SIGN_TIMEOUT_MS);
   if (reply.ok) {
-    signedThisRun = true;
-    return { ok: true };
+    if (!reply.retained) signedThisRun = true;
+    return { ok: true, alreadySigned: Boolean(reply.retained) };
   }
   // No saved sign-in (or it expired): EVS wanted to ask for the account name or password.
   if (reply.code === 'NonInteractiveError' || reply.code === 'NotAuthorizedException') {
